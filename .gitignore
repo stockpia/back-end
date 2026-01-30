@@ -1,0 +1,15 @@
+# .gitignore
+
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+.env
+secrets.json
+my_settings.py
+db.sqlite3
+.DS_Store
+
+stocks/services/
+stocks/services/__pycache__/
