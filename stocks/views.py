@@ -127,63 +127,99 @@ class StockWatchlistView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class StockNewsView(APIView):
+class BaseStockInfoView(APIView):
+    # 부모 클래스(공통 기능)
+    def get_company_name(self, symbol):
+        if symbol.isdigit():
+            try:
+                list_provider = StockListDataProvider()
+                all_market_data = list_provider.get_sorted_market_stocks(limit=3000)
+                stocks = all_market_data.get('stocks', [])
+                found_stock = next((s for s in stocks if s['ticker'] == symbol), None)
+                return found_stock['name'] if found_stock else symbol
+            except:
+                return symbol
+        return symbol
+
+
+class StockNewsView(BaseStockInfoView):
     """
-    Web 02 -  종목 뉴스 및 AI 요약 API
-    URL: /api/web/stocks/{symbol}/news
-    Param: tab(news|community), page(1), limit(10)
+    Web 02 - 종목 뉴스 API
+    URL: /api/web/stocks/{symbol}/news?cursor={optional}&limit=20
     """
 
     def get(self, request, symbol):
-        tab = request.query_params.get('tab', 'news')
-        page = int(request.query_params.get('page', 1))
-        limit = int(request.query_params.get('limit', 10))
+        cursor = request.query_params.get('cursor', '1')
+        limit = int(request.query_params.get('limit', 20))
+        page = int(cursor) if cursor and cursor.isdigit() else 1
 
-        cache_key = f"news_{symbol}_{tab}_{page}"
+        cache_key = f"news_{symbol}_{page}"
         cached_data = cache.get(cache_key)
-
-        if cached_data:
-            return Response(cached_data)
+        if cached_data: return Response(cached_data)
 
         try:
-            ticker = symbol
-            company_name = symbol
-
-            if symbol.isdigit():
-                try:
-                    list_provider = StockListDataProvider()
-                    all_market_data = list_provider.get_sorted_market_stocks(limit=3000)
-                    stocks = all_market_data.get('stocks', [])
-                    found_stock = next((s for s in stocks if s['ticker'] == ticker), None)
-                    if found_stock:
-                        company_name = found_stock['name']
-                    else:
-                        print(f"[WARN] 목록에서 종목명을 찾을 수 없음: {ticker}")
-                except Exception as e:
-                    print(f"[WARN] 종목명 검색 중 에러: {e}")
-
-            else:
-                company_name = symbol
-                try:
-                    list_provider = StockListDataProvider()
-                    found_ticker = list_provider.find_ticker_by_name(symbol)
-                    if found_ticker:
-                        ticker = found_ticker
-                except:
-                    pass
-
+            company_name = self.get_company_name(symbol)
             provider = StockNewsDataProvider()
-            result = provider.get_news_community_api(
-                symbol=ticker,
-                company_name=company_name,
-                tab=tab,
-                page=page,
-                limit=limit
-            )
+            result = provider.get_news(symbol, company_name, page=page, limit=limit)
+            next_cursor = str(page + 1) if result.get('items') else None
 
-            if "error" not in result and result.get("items"):
-                cache.set(cache_key, result, 600)
-            return Response(result)
+            response_data = {
+                "items": result.get('items', []),
+                "next_cursor": next_cursor
+            }
 
+            if response_data["items"]:
+                cache.set(cache_key, response_data, 600)
+
+            return Response(response_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class StockCommunityView(BaseStockInfoView):
+    """
+    Web 02 - 커뮤니티 API (폴링 및 무한 스크롤)
+    URL: /api/web/stocks/{symbol}/community?cursor={optional}&limit=20
+    """
+
+    def get(self, request, symbol):
+        cursor = request.query_params.get('cursor', '1')
+        limit = int(request.query_params.get('limit', 20))
+        page = int(cursor) if cursor and cursor.isdigit() else 1
+
+        try:
+            company_name = self.get_company_name(symbol)
+            provider = StockNewsDataProvider()
+            result = provider.get_community(symbol, company_name, page=page, limit=limit)
+            next_cursor = str(page + 1) if result.get('items') else None
+
+            return Response({
+                "ai_summary": result.get("ai_summary"),
+                "items": result.get("items", []),
+                "next_cursor": next_cursor
+            })
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class StockCommunityLatestView(BaseStockInfoView):
+    """
+    Web 02 - 새 글 확인용 API (상단 갱신)
+    URL: /api/web/stocks/{symbol}/community/latest?since={timestamp}
+    """
+
+    def get(self, request, symbol):
+        since = request.query_params.get('since')
+
+        try:
+            company_name = self.get_company_name(symbol)
+            provider = StockNewsDataProvider()
+
+            # 최신 글 5개만 조회
+            result = provider.get_community(symbol, company_name, page=1, limit=5)
+            return Response({
+                "has_new": True,
+                "items": result.get("items", [])
+            })
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
