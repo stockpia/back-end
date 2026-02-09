@@ -111,7 +111,7 @@ class StockWatchlistView(APIView):
     """
     Web 01 - 관심 종목 리스트 API
     URL: /api/web/stocks/watchlist
-    * 사용자 데이터가 없어 임시 데이터 반환(관심 종목 리스트, id)
+    * 모델 연동 - 데이터 직접 입력/삭제
     """
 
     def get(self, request):
@@ -126,7 +126,6 @@ class StockWatchlistView(APIView):
 
             stock_data = {
                 "symbol": item.symbol,
-                "company_name": item.company_name,
                 "current_price": info.get("current_price", 0),
                 "change_rate": info.get("change_rate", 0),
                 "price_change": info.get("price_change", 0)
@@ -138,26 +137,17 @@ class StockWatchlistView(APIView):
     # 관심 종목 추가 (POST)
     def post(self, request):
         symbol = request.data.get('symbol')
-        company_name = request.data.get('company_name')
 
         if not symbol:
             return Response({"error": "종목 코드가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not company_name:
-            from .services.stock_list_data import StockListDataProvider
-            try:
-                company_name = symbol
-            except:
-                pass
-
         # DB에 저장
         obj, created = Watchlist.objects.get_or_create(
             symbol=symbol,
-            defaults={'company_name': company_name}
         )
 
         if created:
-            return Response({"message": f"{company_name} 추가 완료", "created": True}, status=status.HTTP_201_CREATED)
+            return Response({"message": f"{symbol} 추가 완료", "created": True}, status=status.HTTP_201_CREATED)
         else:
             return Response({"message": "이미 관심 종목에 있습니다.", "created": False}, status=status.HTTP_200_OK)
 
