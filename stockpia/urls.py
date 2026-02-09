@@ -42,6 +42,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/web/', include('stocks.urls')),
     path('api/', include(('sample_swagger.urls', 'api'))),
+
 ]
 
 if settings.DEBUG:

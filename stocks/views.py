@@ -6,6 +6,7 @@ from django.core.cache import cache
 from .services.stock_chart_data import StockChartDataProvider
 from .services.stock_list_data import StockListDataProvider
 from .services.stock_news_data import StockNewsDataProvider
+from .models import Watchlist
 
 
 class StockChartView(APIView):
@@ -17,7 +18,6 @@ class StockChartView(APIView):
     """
 
     def get(self, request, symbol):
-        # 1. 파라미터 받기
         chart_range = request.query_params.get('range', '3m')
         chart_type = request.query_params.get('type', 'candlestick')
 
@@ -115,16 +115,68 @@ class StockWatchlistView(APIView):
     """
 
     def get(self, request):
-        # 임시 관심 종목 리스트
-        dummy_watchlist = ["000660", "005930"]
+        watchlist = Watchlist.objects.all().order_by('-created_at')
 
-        try:
-            provider = StockListDataProvider()
-            result = provider.get_watchlist_stocks(user_id="demo_user", tickers=dummy_watchlist)
-            return Response(result)
+        provider = StockChartDataProvider()
+        result = []
 
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # 관심 종목 목록 조회 (GET)
+        for item in watchlist:
+            info = provider.get_stock_info(item.symbol)
+
+            stock_data = {
+                "symbol": item.symbol,
+                "company_name": item.company_name,
+                "current_price": info.get("current_price", 0),
+                "change_rate": info.get("change_rate", 0),
+                "price_change": info.get("price_change", 0)
+            }
+            result.append(stock_data)
+
+        return Response(result)
+
+    # 관심 종목 추가 (POST)
+    def post(self, request):
+        symbol = request.data.get('symbol')
+        company_name = request.data.get('company_name')
+
+        if not symbol:
+            return Response({"error": "종목 코드가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not company_name:
+            from .services.stock_list_data import StockListDataProvider
+            try:
+                company_name = symbol
+            except:
+                pass
+
+        # DB에 저장
+        obj, created = Watchlist.objects.get_or_create(
+            symbol=symbol,
+            defaults={'company_name': company_name}
+        )
+
+        if created:
+            return Response({"message": f"{company_name} 추가 완료", "created": True}, status=status.HTTP_201_CREATED)
+        else:
+            return Response({"message": "이미 관심 종목에 있습니다.", "created": False}, status=status.HTTP_200_OK)
+
+    # 관심 종목 삭제 (DELETE)
+    def delete(self, request):
+        symbol = request.data.get('symbol')
+
+        if not symbol:
+            symbol = request.query_params.get('symbol')
+
+        if not symbol:
+            return Response({"error": "삭제할 종목 코드가 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        deleted_count, _ = Watchlist.objects.filter(symbol=symbol).delete()
+
+        if deleted_count > 0:
+            return Response({"message": "삭제 완료"}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "목록에 없는 종목입니다."}, status=status.HTTP_404_NOT_FOUND)
 
 
 class BaseStockInfoView(APIView):
