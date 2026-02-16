@@ -6,6 +6,7 @@ from django.core.cache import cache
 from .services.stock_chart_data import StockChartDataProvider
 from .services.stock_list_data import StockListDataProvider
 from .services.stock_news_data import StockNewsDataProvider
+from .services.stock_averaging_data import StockAveragingDataProvider
 from .models import Watchlist
 
 
@@ -265,3 +266,148 @@ class StockCommunityLatestView(BaseStockInfoView):
             })
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AveragingHoldingView(APIView):
+    """
+    Web 03 - 보유 종목 정보 조회 API
+    GET /api/web/averaging/holding/<str:symbol>
+    """
+
+    def get(self, request, symbol):
+        cache_key = f"averaging_holding_{symbol}"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data)
+
+        provider = StockAveragingDataProvider()
+        result = provider.get_holding_info(symbol)
+
+        if result.get("error"):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        cache.set(cache_key, result, 30)
+        return Response(result)
+
+
+class AveragingCalculateQuantityView(APIView):
+    """
+    Web 03 - 물타기 계산 API (수량 기준)
+    POST /api/web/averaging/calculate/quantity
+    """
+
+    def post(self, request):
+        symbol = request.data.get('symbol')
+        price = request.data.get('additional_price')
+        quantity = request.data.get('additional_quantity')
+
+        if not all([symbol, price, quantity]):
+            return Response({"error": "INVALID_INPUT", "message": "모든 필드를 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            price = float(price)
+            quantity = int(quantity)
+            if price <= 0 or quantity <= 0:
+                raise ValueError
+        except ValueError:
+            return Response(
+                {"error": "INVALID_INPUT", "message": "0보다 큰 올바른 숫자를 입력해주세요."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        provider = StockAveragingDataProvider()
+        result = provider.calculate_by_quantity(symbol, price, quantity)
+        if result.get("error"):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(result)
+
+
+class AveragingCalculateAmountView(APIView):
+    """
+    Web 03 - 물타기 계산 API (금액 기준)
+    POST /api/web/averaging/calculate/amount
+    """
+
+    def post(self, request):
+        symbol = request.data.get('symbol')
+        amount = request.data.get('investment_amount')
+        price = request.data.get('purchase_price')
+
+        if not all([symbol, amount, price]):
+            return Response({"error": "INVALID_INPUT", "message": "모든 필드를 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            amount = float(amount)
+            price = float(price)
+            if amount <= 0 or price <= 0:
+                raise ValueError
+        except ValueError:
+            return Response(
+                {"error": "INVALID_INPUT", "message": "0보다 큰 올바른 숫자를 입력해주세요."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        provider = StockAveragingDataProvider()
+        result = provider.calculate_by_amount(symbol, amount, price)
+
+        if result.get("error"):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(result)
+
+
+class AveragingSaveView(APIView):
+    """
+    Web 03 - 물타기 계산 결과 저장 API
+    POST /api/web/averaging/save
+    """
+
+    def post(self, request):
+        symbol = request.data.get('symbol')
+        calc_mode = request.data.get('calculation_mode')
+
+        if not symbol or not calc_mode:
+            return Response(
+                {"error": "INVALID_INPUT", "message": "종목 코드와 계산 모드는 필수입니다."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        provider = StockAveragingDataProvider()
+        # 프론트가 보낸 JSON 구조 그대로 통째로 넘겨서 저장
+        # [cite: 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464]
+        result = provider.save_calculation(symbol, request.data, calc_mode)
+
+        if result.get("error"):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class AveragingHistoryView(APIView):
+    """
+    Web 03 - 계산 히스토리 조회 API
+    GET /api/web/averaging/history/<str:symbol>?limit=10
+    """
+
+    def get(self, request, symbol):
+        # 쿼리 파라미터에서 limit 추출 (기본 10개)
+        # [cite: 626]
+        try:
+            limit = int(request.query_params.get('limit', 10))
+        except ValueError:
+            limit = 10
+
+        cache_key = f"averaging_history_{symbol}_{limit}"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data)
+
+        provider = StockAveragingDataProvider()
+        result = provider.get_calculation_history(symbol, limit)
+
+        if result.get("error"):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        cache.set(cache_key, result, 300)
+        return Response(result)

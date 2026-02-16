@@ -1,6 +1,9 @@
 from django.urls import path
 from .views import (StockChartView, StockListView, StockHoldingView, StockWatchlistView,
-                    StockNewsView, StockCommunityView, StockCommunityLatestView)
+                    StockNewsView, StockCommunityView, StockCommunityLatestView,
+                    AveragingHoldingView, AveragingCalculateQuantityView, AveragingCalculateAmountView,
+                    AveragingSaveView, AveragingHistoryView,
+                    )
 
 urlpatterns = [
     # web01-1 종목 차트 API (/api/web/stocks/{symbol}/chart)
@@ -24,4 +27,25 @@ urlpatterns = [
 
     # web02-3. 커뮤니티 새 글 확인용 (/api/web/stocks/{symbol}/community/latest)
     path('stocks/<str:symbol>/community/latest', StockCommunityLatestView.as_view(), name='stock-community-latest'),
+
+
+    # web03-1 보유 종목 정보 조회
+    # GET /api/web/averaging/holding/{symbol}
+    path('averaging/holding/<str:symbol>', AveragingHoldingView.as_view(), name='averaging-holding'),
+
+    # web03-2-1 수량 기준 물타기 계산
+    # POST /api/web/averaging/calculate/quantity
+    path('averaging/calculate/quantity', AveragingCalculateQuantityView.as_view(), name='averaging-calc-quantity'),
+
+    # web03-2-2 금액 기준 물타기 계산
+    # POST /api/web/averaging/calculate/amount
+    path('averaging/calculate/amount', AveragingCalculateAmountView.as_view(), name='averaging-calc-amount'),
+
+    # web03-3 계산 결과 저장
+    # POST /api/web/averaging/save
+    path('averaging/save', AveragingSaveView.as_view(), name='averaging-save'),
+
+    # web03-4 계산 히스토리 조회
+    # GET /api/web/averaging/history/{symbol}
+    path('averaging/history/<str:symbol>', AveragingHistoryView.as_view(), name='averaging-history'),
 ]
