@@ -3,6 +3,7 @@ from .views import (StockChartView, StockListView, StockHoldingView, StockWatchl
                     StockNewsView, StockCommunityView, StockCommunityLatestView,
                     AveragingHoldingView, AveragingCalculateQuantityView, AveragingCalculateAmountView,
                     AveragingSaveView, AveragingHistoryView,
+                    StockReportView, StockFavoriteToggleView, StockFavoriteListView,
                     )
 
 urlpatterns = [
@@ -48,4 +49,17 @@ urlpatterns = [
     # web03-4 계산 히스토리 조회
     # GET /api/web/averaging/history/{symbol}
     path('averaging/history/<str:symbol>', AveragingHistoryView.as_view(), name='averaging-history'),
+
+
+    # web05-1 종목 리포트 조회 (요약 + 5개 섹션)
+    # GET /api/web/stocks/{symbol}/report
+    path('stocks/<str:symbol>/report', StockReportView.as_view(), name='stock-report'),
+
+    # web05-2 관심 종목 추가/해제
+    # POST /api/web/stocks/{symbol}/favorite
+    path('stocks/<str:symbol>/favorite', StockFavoriteToggleView.as_view(), name='stock-favorite-toggle'),
+
+    # web05-3 관심 종목 목록 조회
+    # GET /api/web/favorites
+    path('favorites', StockFavoriteListView.as_view(), name='stock-favorite-list'),
 ]

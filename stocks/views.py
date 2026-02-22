@@ -8,6 +8,7 @@ from .services.stock_list_data import StockListDataProvider
 from .services.stock_news_data import StockNewsDataProvider
 from .services.stock_averaging_data import StockAveragingDataProvider
 from .models import Watchlist
+from .services.web_stock_report import WebStockReport
 
 
 class StockChartView(APIView):
@@ -402,12 +403,68 @@ class AveragingHistoryView(APIView):
 
         if cached_data:
             return Response(cached_data)
-
         provider = StockAveragingDataProvider()
         result = provider.get_calculation_history(symbol, limit)
-
         if result.get("error"):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
-
         cache.set(cache_key, result, 300)
+        return Response(result)
+
+
+class StockReportView(APIView):
+    """
+    Web05 - 종목 리포트 조회 API (5개 섹션 포함)
+    GET /api/web/stocks/<str:symbol>/report
+    """
+
+    def get(self, request, symbol):
+        user_id = request.query_params.get('user_id', 'default_user')
+        company_name = request.query_params.get('company_name', symbol)
+
+        # 30분(1800초) 캐싱
+        cache_key = f"web05_report_{symbol}_{user_id}"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data)
+        web_report = WebStockReport()
+        result = web_report.get_report(symbol, company_name, user_id)
+        if "error" in result:
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+        cache.set(cache_key, result, 1800)
+        return Response(result)
+
+
+class StockFavoriteToggleView(APIView):
+    """
+    Web05 - 관심 종목 추가/해제 API
+    POST /api/web/stocks/<str:symbol>/favorite
+    """
+
+    def post(self, request, symbol):
+        user_id = request.data.get('user_id', 'default_user')
+        company_name = request.data.get('company_name', symbol)
+        action = request.data.get('action')  # "add" or "remove"
+        web_report = WebStockReport()
+
+        if action == "add":
+            result = web_report.add_favorite(user_id, symbol, company_name)
+        elif action == "remove":
+            result = web_report.remove_favorite(user_id, symbol)
+        else:
+            return Response({"error": "action 파라미터는 'add' 또는 'remove'"}, status=status.HTTP_400_BAD_REQUEST)
+        cache.delete(f"web05_report_{symbol}_{user_id}")
+        return Response(result)
+
+
+class StockFavoriteListView(APIView):
+    """
+    Web05 - 관심 종목 목록 조회 API
+    GET /api/web/favorites
+    """
+
+    def get(self, request):
+        user_id = request.query_params.get('user_id', 'default_user')
+        web_report = WebStockReport()
+        result = web_report.get_favorites(user_id)
         return Response(result)
