@@ -11,6 +11,4 @@ my_settings.py
 db.sqlite3
 .DS_Store
 
-stocks/services/
-stocks/services/__pycache__/
 *.pyc
