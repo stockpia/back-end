@@ -13,3 +13,4 @@ db.sqlite3
 
 stocks/services/
 stocks/services/__pycache__/
+*.pyc
