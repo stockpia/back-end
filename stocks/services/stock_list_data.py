@@ -140,11 +140,25 @@ class StockListDataProvider:
         print(f"전체 종목 리스트 조회 시도: {market}, {sort_by}")
 
         try:
-            # fdr 사용
             if fdr is None:
                 raise ImportError("FinanceDataReader 미설치")
 
-            df = fdr.StockListing('KRX')
+            try:
+                # fdr 사용
+                df = fdr.StockListing('KRX')
+
+            except Exception as fdr_error:
+                print(f"[WARN] FDR 조회 실패, 거래소 서버 점검 의심: {fdr_error}")
+                fallback_data = self.get_market_stocks(market=market, limit=limit)
+                if "error" not in fallback_data:
+                    # pykrx 리턴
+                    sorted_fallback = self.sort_stocks(fallback_data["stocks"], sort_by=sort_by, order=order)
+                    fallback_data["stocks"] = sorted_fallback
+                    fallback_data["sort_by"] = sort_by
+                    fallback_data["order"] = order
+                    return fallback_data
+                else:
+                    raise Exception("FDR과 pykrx 모두 데이터를 가져오지 못했습니다.")
 
             # (KOSPI, KOSDAQ)
             if market == "KOSPI":
