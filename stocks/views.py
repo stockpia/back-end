@@ -9,6 +9,7 @@ from .services.stock_news_data import StockNewsDataProvider
 from .services.stock_averaging_data import StockAveragingDataProvider
 from .models import Watchlist
 from .services.web_stock_report import WebStockReport
+from .services.web_detail_report import WebDetailReport
 
 
 class StockChartView(APIView):
@@ -409,6 +410,43 @@ class AveragingHistoryView(APIView):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
         cache.set(cache_key, result, 300)
         return Response(result)
+
+
+class StockDetailReportView(APIView):
+    """
+    Web04 - 종목 상세 분석 리포트 API
+    GET /api/web/stocks/<str:symbol>/detail
+    """
+
+    def get(self, request, symbol):
+        user_id = request.query_params.get('user_id', 'default_user')
+
+        # 상세 리포트 캐싱(1시간 유지)
+        cache_key = f"web04_detail_{symbol}_{user_id}"
+        cached_data = cache.get(cache_key)
+
+        if cached_data:
+            return Response(cached_data)
+
+        try:
+            detail_report_service = WebDetailReport()
+
+            # 서비스 계층 호출
+            result = detail_report_service.get_detailed_report(symbol, user_id=user_id)
+
+            # 외부 API 점검 등으로 인한 에러 발생 시 처리
+            if "error" in result:
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+            cache.set(cache_key, result, 3600)
+            return Response(result, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            error_response = {
+                "error": str(e),
+                "message": "현재 데이터 제공 서버 점검으로 인해 상세 리포트를 생성할 수 없습니다."
+            }
+            return Response(error_response, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class StockReportView(APIView):

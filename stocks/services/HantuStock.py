@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import pandas as pd
 import time
@@ -73,7 +75,7 @@ class HantuStock:
             "inquire-balance": "8434R",
             "order-buy": "0012U",
             "order-sell": "0011U",
-            "inquire-daily-ccld": "0081R",  # 주식일별주문체결조회 (3개월 이내)
+            "inquire-daily-ccld": "8001R",  # 주식일별주문체결조회 (3개월 이내)
         }
         return prefix + codes[key]
 
