@@ -420,9 +420,9 @@ class StockDetailReportView(APIView):
 
     def get(self, request, symbol):
         user_id = request.query_params.get('user_id', 'default_user')
+        period = request.query_params.get('period', '1m')
 
-        # 상세 리포트 캐싱(1시간 유지)
-        cache_key = f"web04_detail_{symbol}_{user_id}"
+        cache_key = f"web04_detail_{symbol}_{user_id}_{period}"
         cached_data = cache.get(cache_key)
 
         if cached_data:
@@ -432,9 +432,11 @@ class StockDetailReportView(APIView):
             detail_report_service = WebDetailReport()
 
             # 서비스 계층 호출
-            result = detail_report_service.get_detailed_report(symbol, user_id=user_id)
+            result = detail_report_service.get_detail_report(
+                scope=symbol,
+                period=period,
+            )
 
-            # 외부 API 점검 등으로 인한 에러 발생 시 처리
             if "error" in result:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
@@ -442,6 +444,8 @@ class StockDetailReportView(APIView):
             return Response(result, status=status.HTTP_200_OK)
 
         except Exception as e:
+            print(f"[API 500 에러 원인 추적] {e}")
+
             error_response = {
                 "error": str(e),
                 "message": "현재 데이터 제공 서버 점검으로 인해 상세 리포트를 생성할 수 없습니다."
