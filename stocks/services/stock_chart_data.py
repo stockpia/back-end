@@ -10,6 +10,7 @@
 - Plotly 차트 생성 (fig.to_json())
 """
 
+import time
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
@@ -37,6 +38,10 @@ except ImportError:
     make_subplots = None
 
 
+# 모듈 레벨 HantuStock 싱글톤 (프로세스 내 1회만 초기화, 토큰 재발급 방지)
+_hantu_shared = None
+
+
 class StockChartDataProvider:
     """종목 차트 페이지용 데이터 제공 클래스"""
 
@@ -45,15 +50,21 @@ class StockChartDataProvider:
         Args:
             hantu_stock: HantuStock 인스턴스 (선택). 제공 시 실시간 시세/PER/PBR 조회 가능
         """
+        global _hantu_shared
+
         if fdr is None:
             raise ImportError("FinanceDataReader가 설치되지 않았습니다. pip install finance-datareader")
 
         self._hantu = hantu_stock
         if hantu_stock is None and HantuStock is not None:
-            try:
-                self._hantu = HantuStock()
-            except Exception as e:
-                print(f"[WARN] HantuStock 초기화 실패: {e}. 일부 기능 제한됨.")
+            if _hantu_shared is not None:
+                self._hantu = _hantu_shared  # 기존 인스턴스 재사용 (토큰 재발급 없음)
+            else:
+                try:
+                    _hantu_shared = HantuStock()
+                    self._hantu = _hantu_shared
+                except Exception as e:
+                    print(f"[WARN] HantuStock 초기화 실패: {e}. 일부 기능 제한됨.")
 
         # DART 클라이언트 (부채비율/현금흐름 등)
         self._dart = None
@@ -66,6 +77,37 @@ class StockChartDataProvider:
             except Exception as e:
                 print(f"[WARN] DartClient 초기화 실패: {e}")
 
+        # 요청 내 TTL 캐시 (KIS: 60초, FDR: 300초)
+        self._price_cache: dict = {}  # ticker → (data_dict, fetch_time)
+        self._fdr_cache: dict = {}    # ticker → (DataFrame, fetch_time)
+
+    # ==================== 내부 캐시 헬퍼 ====================
+
+    def _get_stock_price_data(self, ticker: str) -> dict:
+        """KIS 현재가 조회 (60초 TTL 캐시 — 동일 요청 내 중복 호출 방지)"""
+        cached = self._price_cache.get(ticker)
+        if cached and (time.time() - cached[1]) < 60:
+            return cached[0]
+        if not self._hantu:
+            return {"error": "HantuStock 미초기화"}
+        data = self._hantu.get_stock_price(ticker)
+        self._price_cache[ticker] = (data, time.time())
+        return data
+
+    def _get_fdr_df(self, ticker: str) -> pd.DataFrame:
+        """FDR 과거 데이터 조회 (300초 TTL 캐시 — 동일 요청 내 중복 다운로드 방지)"""
+        cached = self._fdr_cache.get(ticker)
+        if cached and (time.time() - cached[1]) < 300:
+            return cached[0]
+        df = fdr.DataReader(ticker)
+        df.columns = [c.lower() for c in df.columns]
+        self._fdr_cache[ticker] = (df, time.time())
+        return df
+
+    def get_historical_data(self, ticker: str) -> pd.DataFrame:
+        """FDR 과거 데이터 공개 메서드 (chatbot/web _calculate_returns 전용)"""
+        return self._get_fdr_df(ticker)
+
     # ==================== 기본 정보 ====================
 
     def get_stock_info(self, ticker: str) -> Dict:
@@ -76,9 +118,9 @@ class StockChartDataProvider:
             dict: company_name, ticker, current_price, price_change, change_rate
         """
         try:
-            # 한투 API 사용 가능하면 실시간 데이터 조회
+            # 한투 API 사용 가능하면 실시간 데이터 조회 (캐시 활용)
             if self._hantu:
-                data = self._hantu.get_stock_price(ticker)
+                data = self._get_stock_price_data(ticker)
                 if "error" not in data:
                     return {
                         "company_name": data.get('name', ticker),
@@ -93,8 +135,8 @@ class StockChartDataProvider:
                         "source": "한국투자증권 API (실시간)"
                     }
 
-            # fallback: FinanceDataReader 사용
-            df = fdr.DataReader(ticker)
+            # fallback: FinanceDataReader 사용 (캐시 활용)
+            df = self._get_fdr_df(ticker)
             if df.empty:
                 return {"error": "데이터를 찾을 수 없습니다"}
 
@@ -102,8 +144,8 @@ class StockChartDataProvider:
             latest = df.iloc[-1]
             prev = df.iloc[-2] if len(df) > 1 else df.iloc[-1]
 
-            current_price = float(latest['Close'])
-            prev_close = float(prev['Close'])
+            current_price = float(latest['close'])
+            prev_close = float(prev['close'])
             price_change = current_price - prev_close
             change_rate = (price_change / prev_close) * 100 if prev_close > 0 else 0
 
@@ -146,9 +188,7 @@ class StockChartDataProvider:
         days = period_days.get(period, 90)
 
         try:
-            df = fdr.DataReader(ticker)
-            df = df.tail(days)
-            df.columns = [c.lower() for c in df.columns]
+            df = self._get_fdr_df(ticker).tail(days).copy()
 
             return {
                 "ticker": ticker,
@@ -176,9 +216,9 @@ class StockChartDataProvider:
             dict: per, pbr, eps, bps, roe
         """
         try:
-            # 한투 API로 실시간 조회
+            # 한투 API로 실시간 조회 (캐시 활용)
             if self._hantu:
-                data = self._hantu.get_stock_price(ticker)
+                data = self._get_stock_price_data(ticker)
 
                 if "error" not in data:
                     eps = data.get('eps', 0)
@@ -214,11 +254,7 @@ class StockChartDataProvider:
             dict: rsi, ma5, ma20, ma60, trend
         """
         try:
-            df = fdr.DataReader(ticker)
-            df.columns = [c.lower() for c in df.columns]
-
-            # 충분한 데이터 확보 (최소 60일)
-            df = df.tail(max(100, 60))
+            df = self._get_fdr_df(ticker).tail(max(100, 60)).copy()
 
             close = df['close']
 

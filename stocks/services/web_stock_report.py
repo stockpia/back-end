@@ -40,7 +40,7 @@ class WebStockReport:
 
     def __init__(self):
         """Initialize"""
-        from .stock_chart_data import StockChartDataProvider
+        from stock_chart_data import StockChartDataProvider
         self.chart_provider = StockChartDataProvider()
 
         # Gemini (LLM)
@@ -73,19 +73,18 @@ class WebStockReport:
         return data
 
     def _calculate_returns(self, symbol: str) -> Dict:
-        """기간별 수익률 계산"""
+        """기간별 수익률 계산 (chart_provider FDR 캐시 활용)"""
         try:
-            import FinanceDataReader as fdr
-            df = fdr.DataReader(symbol)
+            df = self.chart_provider.get_historical_data(symbol)
             if df.empty:
                 return {"error": "데이터 없음"}
 
-            current = float(df['Close'].iloc[-1])
+            current = float(df['close'].iloc[-1])
             periods = {"1m": 21, "3m": 63, "1y": 252}
             returns = {}
             for key, days in periods.items():
                 if len(df) > days:
-                    past_price = float(df['Close'].iloc[-days])
+                    past_price = float(df['close'].iloc[-days])
                     returns[key] = round((current - past_price) / past_price * 100, 1)
                 else:
                     returns[key] = None

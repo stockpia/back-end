@@ -21,9 +21,7 @@ class TavilySearchClient:
         """Tavily API 초기화"""
         self.api_key = os.environ.get("TAVILY_API_KEY")
         if not self.api_key:
-            print("TAVILY_API_KEY not found in environment")
-            self.available = False
-            return
+            raise ValueError("TAVILY_API_KEY not found in environment")
 
         try:
             from tavily import TavilyClient
@@ -31,10 +29,6 @@ class TavilySearchClient:
             self.available = True
         except ImportError:
             print("Warning: tavily-python not installed. Run: pip install tavily-python")
-            self.available = False
-        # 에러 처리
-        except Exception as e:
-            print(f"Error: Tavily 클라이언트 초기화 실패: {e}")
             self.available = False
 
     def search_stock_news(
@@ -57,15 +51,23 @@ class TavilySearchClient:
         if not self.available:
             return {"error": "Tavily not available", "results": []}
 
-        query = f"{company_name} 주식 뉴스 최신"
+        query = f"{company_name} 주식 뉴스"
 
         try:
             response = self.client.search(
                 query=query,
                 search_depth="basic",
+                time_range="week",  # 최근 1주일 (topic="news" 없이 동작, 영어 편향 방지)
                 max_results=max_results,
                 include_answer=True,
-                include_domains=["naver.com", "hankyung.com", "mk.co.kr", "sedaily.com", "edaily.co.kr"]
+                include_domains=[
+                    "news.naver.com",   # 네이버 뉴스 (finance.naver.com 커뮤니티 제외)
+                    "hankyung.com",
+                    "mk.co.kr",
+                    "sedaily.com",
+                    "edaily.co.kr"
+                ],
+                exclude_domains=["finance.naver.com"]  # 종목토론실 명시적 제외
             )
 
             return {
@@ -75,8 +77,9 @@ class TavilySearchClient:
                     {
                         "title": r.get("title", ""),
                         "url": r.get("url", ""),
-                        "content": r.get("content", "")[:300],  # 300자로 제한
-                        "score": r.get("score", 0)
+                        "content": r.get("content", "")[:300],
+                        "score": r.get("score", 0),
+                        "published_date": r.get("published_date", "")  # 기사 발행일
                     }
                     for r in response.get("results", [])
                 ],
@@ -147,14 +150,16 @@ class TavilySearchClient:
         if not self.available:
             return {"error": "Tavily not available", "results": []}
 
-        query = f"{company_name} 주식 전망 투자 의견"
+        query = f"{company_name} 주식 투자자 반응 의견"
 
         try:
             response = self.client.search(
                 query=query,
-                search_depth="basic",  # 비용 절감 (advanced → basic)
+                search_depth="basic",
+                time_range="day",   # 최근 1일 — 커뮤니티는 더 짧은 주기
                 max_results=max_results,
-                include_answer=True
+                include_answer=True,
+                include_domains=["naver.com", "hankyung.com", "mk.co.kr", "sedaily.com", "edaily.co.kr"]
             )
 
             return {
@@ -164,7 +169,8 @@ class TavilySearchClient:
                     {
                         "title": r.get("title", ""),
                         "url": r.get("url", ""),
-                        "content": r.get("content", "")[:300]
+                        "content": r.get("content", "")[:300],
+                        "published_date": r.get("published_date", "")  # 게시 일자
                     }
                     for r in response.get("results", [])
                 ],

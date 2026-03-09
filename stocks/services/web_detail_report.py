@@ -37,14 +37,14 @@ class WebDetailReport:
 
     def __init__(self):
         """Initialize"""
-        from .HantuStock import HantuStock
+        from HantuStock import HantuStock
         self.hantu = HantuStock()
 
         # Gemini (LLM) - narrative + AI 비서
         self.gemini_key = os.environ.get("GEMINI_API_KEY")
         if self.gemini_key:
             try:
-                import google.generativeai as genai
+                import google.genai as genai
                 genai.configure(api_key=self.gemini_key)
                 self.genai = genai
             except ImportError:
@@ -53,7 +53,7 @@ class WebDetailReport:
             self.genai = None
 
         # 용어 사전 (AI 비서용)
-        from .glossary_api import GlossaryAPI
+        from glossary_api import GlossaryAPI
         self.glossary = GlossaryAPI()
 
     # ========================================

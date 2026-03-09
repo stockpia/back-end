@@ -2,9 +2,6 @@
 Web_02 뉴스/커뮤니티 데이터 프로바이더
 종목 상세 페이지 하단의 뉴스/커뮤니티 탭 데이터 제공
 """
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-# 코드 경고 무시
 
 import os
 from typing import Dict, List, Optional
@@ -27,7 +24,7 @@ class StockNewsDataProvider:
         """Initialize"""
         # Tavily 웹 검색
         try:
-            from stocks.services.tavily_search import TavilySearchClient
+            from tavily_search import TavilySearchClient
             self.tavily = TavilySearchClient()
         except Exception as e:
             print(f"Warning: Tavily 초기화 실패 - {e}")
@@ -45,12 +42,23 @@ class StockNewsDataProvider:
         else:
             self.genai = None
 
-        # 투자 관련 키워드 (1단계 필터링)
+
+        # 투자 관련 키워드 (1단계 필터링) — 소문자로 통일 (text.lower() 매칭)
         self.investment_keywords = [
+            # 기존 키워드 (소문자 통일)
             "주가", "주식", "투자", "매수", "매도", "목표가", "실적",
-            "영업이익", "매출", "배당", "공시", "IR", "애널리스트",
-            "증권", "펀드", "ETF", "상승", "하락", "전망"
+            "영업이익", "매출", "배당", "공시", "ir", "애널리스트",
+            "증권", "펀드", "etf", "상승", "하락", "전망",
+            # 기획서 추가 키워드
+            "순이익", "컨센서스",
+            "급등", "급락",
+            "자사주", "소각", "증자", "무상증자", "유상증자", "액면분할",
+            "제재", "승인", "허가", "규제",
+            "인수", "합병", "m&a", "분할", "상장",
         ]
+
+        # 제외 키워드 (투자 무관 콘텐츠 차단)
+        self.exclude_keywords = ["브랜드", "캠페인", "사회공헌", "인터뷰"]
 
     # ========================================
     # 뉴스 탭 API
@@ -61,7 +69,7 @@ class StockNewsDataProvider:
         symbol: str,
         company_name: str,
         page: int = 1,
-        limit: int = 10
+        limit: int = 20
     ) -> Dict:
         """
         뉴스 탭 데이터 (투자 관련 필터링)
@@ -112,7 +120,7 @@ class StockNewsDataProvider:
                     "content": item.get("content", "")[:150] + "...",
                     "url": item.get("url", ""),
                     "source": self._extract_source(item.get("url", "")),
-                    "published_at": search_result.get("searched_at", ""),
+                    "published_at": item.get("published_date", "") or search_result.get("searched_at", ""),
                     "is_investment_related": True
                 }
                 for i, item in enumerate(paged_news, start=start_idx + 1)
@@ -123,7 +131,7 @@ class StockNewsDataProvider:
     def _filter_investment_news(self, results: List[Dict]) -> List[Dict]:
         """
         투자 관련 뉴스 2단계 필터링
-        1단계: 키워드 필터
+        1단계: 키워드 필터 (포함 + 제외)
         2단계: LLM 분류 (선택)
         """
         filtered = []
@@ -133,7 +141,11 @@ class StockNewsDataProvider:
             content = item.get("content", "")
             text = f"{title} {content}".lower()
 
-            # 1단계: 키워드 필터
+            # 1단계-A: 제외 키워드 체크 (투자 무관 콘텐츠 차단)
+            if any(ek in text for ek in self.exclude_keywords):
+                continue
+
+            # 1단계-B: 포함 키워드 필터
             if any(kw in text for kw in self.investment_keywords):
                 filtered.append(item)
 
@@ -192,7 +204,7 @@ class StockNewsDataProvider:
         symbol: str,
         company_name: str,
         page: int = 1,
-        limit: int = 10,
+        limit: int = 20,
         last_id: Optional[str] = None
     ) -> Dict:
         """
@@ -250,7 +262,7 @@ class StockNewsDataProvider:
                     "url": item.get("url", ""),
                     "source": self._extract_source(item.get("url", "")),
                     "sentiment": self._analyze_sentiment(item.get("content", "")),
-                    "published_at": search_result.get("searched_at", "")
+                    "published_at": item.get("published_date", "") or search_result.get("searched_at", "")
                 }
                 for i, item in enumerate(paged_results, start=start_idx + 1)
             ],

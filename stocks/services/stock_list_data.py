@@ -4,7 +4,6 @@
 """
 
 import pandas as pd
-import FinanceDataReader as fdr
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -14,7 +13,7 @@ except ImportError:
     pykrx_stock = None
 
 try:
-    from .HantuStock import HantuStock
+    from HantuStock import HantuStock
 except ImportError:
     HantuStock = None
 
@@ -134,98 +133,41 @@ class StockListDataProvider:
 
         return sorted(stocks, key=lambda x: x.get(key, 0), reverse=reverse)
 
-    def get_sorted_market_stocks(self, market: str = "ALL", sort_by: str = "change_rate", order: str = "desc",
-                                 limit: int = 3000) -> Dict:
+    def get_sorted_market_stocks(
+        self,
+        market: str = "ALL",
+        sort_by: str = "price",
+        order: str = "desc",
+        limit: int = 100
+    ) -> Dict:
+        """
+        정렬된 시장 종목 리스트 조회
 
-        print(f"전체 종목 리스트 조회 시도: {market}, {sort_by}")
+        Args:
+            market: 시장 구분 (KOSPI, KOSDAQ, ALL)
+            sort_by: 정렬 기준 (price, change_rate, volume)
+            order: 정렬 순서 (asc, desc)
+            limit: 최대 조회 개수
 
-        try:
-            if fdr is None:
-                raise ImportError("FinanceDataReader 미설치")
+        Returns:
+            dict: 정렬된 종목 리스트
+        """
+        result = self.get_market_stocks(market, limit=500)  # 정렬 전 충분히 가져옴
 
-            try:
-                # fdr 사용
-                df = fdr.StockListing('KRX')
+        if "error" in result:
+            return result
 
-            except Exception as fdr_error:
-                print(f"[WARN] FDR 조회 실패, 거래소 서버 점검 의심: {fdr_error}")
-                fallback_data = self.get_market_stocks(market=market, limit=limit)
-                if "error" not in fallback_data:
-                    # pykrx 리턴
-                    sorted_fallback = self.sort_stocks(fallback_data["stocks"], sort_by=sort_by, order=order)
-                    fallback_data["stocks"] = sorted_fallback
-                    fallback_data["sort_by"] = sort_by
-                    fallback_data["order"] = order
-                    return fallback_data
-                else:
-                    raise Exception("FDR과 pykrx 모두 데이터를 가져오지 못했습니다.")
+        stocks = result["stocks"]
+        sorted_stocks = self.sort_stocks(stocks, sort_by, order)
 
-            # (KOSPI, KOSDAQ)
-            if market == "KOSPI":
-                df = df[df['Market'] == 'KOSPI']
-            elif market == "KOSDAQ":
-                df = df[df['Market'] == 'KOSDAQ']
-
-            # 정렬 기준 매핑
-            # 1. 현재가 (Close)
-            if df['Close'].dtype == 'object':
-                df['Close'] = df['Close'].astype(str).str.replace(',', '')
-            df['Close'] = pd.to_numeric(df['Close'], errors='coerce').fillna(0)
-
-            # 2. 거래량 (Volume)
-            if df['Volume'].dtype == 'object':
-                df['Volume'] = df['Volume'].astype(str).str.replace(',', '')
-            df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce').fillna(0)
-
-            # 3. 등락률 (컬럼명 자동 찾기)
-            # FDR 버전에 따라 'ChagesRatio' 또는 'ChangesRatio' 둘 중 하나임
-            col_change = 'ChagesRatio' if 'ChagesRatio' in df.columns else 'ChangesRatio'
-
-            # 등락률 숫자 변환
-            if col_change in df.columns:
-                df[col_change] = pd.to_numeric(df[col_change], errors='coerce').fillna(0)
-
-            # --- [수정] 정렬 기준 설정 (변수 사용) ---
-            if sort_by == "change_rate":
-                sort_col = col_change  # [중요] 하드코딩 대신 찾은 컬럼명 사용
-            elif sort_by == "volume":
-                sort_col = "Volume"  # 거래량
-            elif sort_by == "price":
-                sort_col = "Close"  # 현재가
-            else:
-                sort_col = col_change
-
-            # 정렬 수행
-            ascending = True if order == "asc" else False
-            if sort_col in df.columns:
-                df = df.sort_values(by=sort_col, ascending=ascending)
-
-            # 상위 N
-            df = df.head(limit)
-
-            stocks = []
-            for _, row in df.iterrows():
-                try:
-                    stocks.append({
-                        "ticker": str(row['Code']),  # 종목코드
-                        "name": row['Name'],  # 종목명
-                        "current_price": int(row['Close']) if not pd.isna(row['Close']) else 0,
-                        "change_rate": round(float(row[col_change]), 2) if not pd.isna(row['ChagesRatio']) else 0.0,
-                        "volume": int(row['Volume']) if not pd.isna(row['Volume']) else 0
-                    })
-                except:
-                    continue
-
-            print(f"[INFO] FDR 조회 성공: {len(stocks)}개")
-            return {
-                "market": market,
-                "sort_by": sort_by,
-                "order": order,
-                "count": len(stocks),
-                "stocks": stocks
-            }
-        except Exception as e:
-            return {"error": str(e)}
+        return {
+            "date": result["date"],
+            "market": market,
+            "sort_by": sort_by,
+            "order": order,
+            "count": min(len(sorted_stocks), limit),
+            "stocks": sorted_stocks[:limit]
+        }
 
     # ==================== 보유 종목 리스트 ====================
 
@@ -307,7 +249,6 @@ class StockListDataProvider:
         Returns:
             dict: 관심 종목 리스트 (현재가 정보 포함)
         """
-
         if not tickers:
             return {
                 "count": 0,
@@ -315,32 +256,15 @@ class StockListDataProvider:
                 "message": "관심 종목이 없습니다"
             }
 
-        # 종목 이름 불러오는 코드
-        try:
-            all_market_data = self.get_sorted_market_stocks(limit=3000)
-            all_stocks = all_market_data.get('stocks', [])
-            ticker_to_name = {stock['ticker']: stock['name'] for stock in all_stocks}
-        except Exception as e:
-            print(f"이름 매핑 데이터 생성 실패: {e}")
-            ticker_to_name = {}
-
         stocks = []
         for ticker in tickers:
             try:
                 if self._hantu:
                     data = self._hantu.get_stock_price(ticker)
                     if "error" not in data:
-
-                        api_name = data.get("name", "")
-
-                        if api_name:
-                            final_name = api_name
-                        else:
-                            final_name = ticker_to_name.get(ticker, ticker)
-
                         stocks.append({
                             "ticker": ticker,
-                            "name": final_name,
+                            "name": data.get("name", ticker),
                             "current_price": data.get("current_price", 0),
                             "change_rate": data.get("change_rate", 0),
                             "volume": data.get("volume", 0)
@@ -353,16 +277,6 @@ class StockListDataProvider:
             "count": len(stocks),
             "stocks": stocks
         }
-
-# 추가 기능 - 종목 이름으로 종목 코드 검색
-    def find_ticker_by_name(self, name: str) -> str:
-        all_data = self.get_sorted_market_stocks(limit=3000)
-        stock_list = all_data.get('stocks', [])
-
-        for stock in stock_list:
-            if stock['name'] == name:
-                return stock['ticker']
-        return None
 
 
 # 테스트
