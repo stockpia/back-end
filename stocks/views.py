@@ -7,7 +7,6 @@ from .services.stock_chart_data import StockChartDataProvider
 from .services.stock_list_data import StockListDataProvider
 from .services.stock_news_data import StockNewsDataProvider
 from .services.stock_averaging_data import StockAveragingDataProvider
-from .models import Watchlist
 from .services.web_stock_report import WebStockReport
 from .services.web_detail_report import WebDetailReport
 
@@ -118,71 +117,6 @@ class StockHoldingView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class StockWatchlistView(APIView):
-    """
-    Web 01 - 관심 종목 리스트 API
-    URL: /api/web/stocks/watchlist
-    * 모델 연동 - 데이터 직접 입력/삭제
-    """
-
-    # noinspection PyMethodMayBeStatic,PyUnusedLocal
-    def get(self, request):
-        watchlist = Watchlist.objects.all().order_by('-created_at')
-
-        provider = StockChartDataProvider()
-        result = []
-
-        # 관심 종목 목록 조회 (GET)
-        for item in watchlist:
-            info = provider.get_stock_info(item.symbol)
-
-            stock_data = {
-                "symbol": item.symbol,
-                "current_price": info.get("current_price", 0),
-                "change_rate": info.get("change_rate", 0),
-                "price_change": info.get("price_change", 0)
-            }
-            result.append(stock_data)
-
-        return Response(result)
-
-    # 관심 종목 추가 (POST)
-    # noinspection PyMethodMayBeStatic
-    def post(self, request):
-        symbol = request.data.get('symbol')
-
-        if not symbol:
-            return Response({"error": "종목 코드가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # DB에 저장
-        obj, created = Watchlist.objects.get_or_create(
-            symbol=symbol,
-        )
-
-        if created:
-            return Response({"message": f"{symbol} 추가 완료", "created": True}, status=status.HTTP_201_CREATED)
-        else:
-            return Response({"message": "이미 관심 종목에 있습니다.", "created": False}, status=status.HTTP_200_OK)
-
-    # 관심 종목 삭제 (DELETE)
-    # noinspection PyMethodMayBeStatic
-    def delete(self, request):
-        symbol = request.data.get('symbol')
-
-        if not symbol:
-            symbol = request.query_params.get('symbol')
-
-        if not symbol:
-            return Response({"error": "삭제할 종목 코드가 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
-
-        deleted_count, _ = Watchlist.objects.filter(symbol=symbol).delete()
-
-        if deleted_count > 0:
-            return Response({"message": "삭제 완료"}, status=status.HTTP_200_OK)
-        else:
-            return Response({"error": "목록에 없는 종목입니다."}, status=status.HTTP_404_NOT_FOUND)
-
-
 class BaseStockInfoView(APIView):
     # 부모 클래스(공통 기능)
     # noinspection PyMethodMayBeStatic
@@ -220,6 +154,10 @@ class StockNewsView(BaseStockInfoView):
             company_name = self.get_company_name(symbol)
             provider = StockNewsDataProvider()
             result = provider.get_news(symbol, company_name, page=page, limit=limit)
+            
+            if "error" in result:
+                return Response({"error": result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+                
             next_cursor = str(page + 1) if result.get('items') else None
 
             response_data = {
@@ -252,6 +190,10 @@ class StockCommunityView(BaseStockInfoView):
             company_name = self.get_company_name(symbol)
             provider = StockNewsDataProvider()
             result = provider.get_community(symbol, company_name, page=page, limit=limit)
+            
+            if "error" in result:
+                return Response({"error": result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+                
             next_cursor = str(page + 1) if result.get('items') else None
 
             return Response({
@@ -278,6 +220,10 @@ class StockCommunityLatestView(BaseStockInfoView):
 
             # 최신 글 5개만 조회
             result = provider.get_community(symbol, company_name, page=1, limit=5)
+            
+            if "error" in result:
+                return Response({"error": result["error"]}, status=status.HTTP_400_BAD_REQUEST)
+                
             return Response({
                 "has_new": True,
                 "items": result.get("items", [])
@@ -399,11 +345,13 @@ class AveragingSaveView(APIView):
 
         provider = StockAveragingDataProvider()
         # 프론트가 보낸 JSON 구조 그대로 통째로 넘겨서 저장
-        # [cite: 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464]
         result = provider.save_calculation(symbol, request.data, calc_mode)
 
         if result.get("error"):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        # 저장 성공 시 캐시 무효화 (기본 limit 10 기준)
+        cache.delete(f"averaging_history_{symbol}_10")
 
         return Response(result, status=status.HTTP_201_CREATED)
 
@@ -417,7 +365,6 @@ class AveragingHistoryView(APIView):
     # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
         # 쿼리 파라미터에서 limit 추출 (기본 10개)
-        # [cite: 626]
         try:
             limit = int(request.query_params.get('limit', 10))
         # noinspection PyBroadException
@@ -429,10 +376,13 @@ class AveragingHistoryView(APIView):
 
         if cached_data:
             return Response(cached_data)
+        
         provider = StockAveragingDataProvider()
         result = provider.get_calculation_history(symbol, limit)
+        
         if result.get("error"):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
         cache.set(cache_key, result, 300)
         return Response(result)
 

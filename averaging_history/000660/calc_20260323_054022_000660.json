@@ -1,0 +1,27 @@
+{
+  "calculation_id": "calc_20260323_054022_000660",
+  "symbol": "000660",
+  "company_name": "SK하이닉스",
+  "saved_at": "2026-03-23 05:40:22",
+  "calculation_mode": "quantity",
+  "snapshot": {
+    "current_avg_price": 160000,
+    "current_quantity": 10,
+    "current_price": 155000
+  },
+  "input": {
+    "additional_price": 150000,
+    "additional_quantity": 5
+  },
+  "result": {
+    "new_avg_price": 156666,
+    "avg_price_change": -3334,
+    "avg_price_change_pct": -2.08,
+    "total_quantity": 15,
+    "total_cost": 2350000,
+    "additional_cost": 750000,
+    "breakeven_price": 156666,
+    "profit_if_sell_now": -25000,
+    "profit_pct": -1.06
+  }
+}

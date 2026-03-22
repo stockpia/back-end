@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import (StockChartView, StockListView, StockHoldingView, StockWatchlistView,
+from .views import (StockChartView, StockListView, StockHoldingView,# StockWatchlistView,
                     StockNewsView, StockCommunityView, StockCommunityLatestView,
                     AveragingHoldingView, AveragingCalculateQuantityView, AveragingCalculateAmountView,
                     AveragingSaveView, AveragingHistoryView,
@@ -18,7 +18,7 @@ urlpatterns = [
     path('stocks/holdings', StockHoldingView.as_view()),
 
     # web01-4 관심 종목 리스트 API (/api/web/stocks/watchlist)
-    path('stocks/watchlist', StockWatchlistView.as_view()),
+    #path('stocks/watchlist', StockWatchlistView.as_view()),
 
 
     # web02-1 뉴스 리스트 API (/api/web/stocks/{symbol}/news)

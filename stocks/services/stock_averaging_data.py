@@ -78,6 +78,8 @@ class StockAveragingDataProvider:
 
             # 종목명 조회 (간단하게 처리)
             company_name = holding.get('prdt_name', '') if holding else self._get_company_name(symbol)
+            if not company_name:
+                company_name = symbol
 
             if not holding:
                 return {
@@ -87,10 +89,10 @@ class StockAveragingDataProvider:
                     "message": f"현재 {company_name}을(를) 보유하고 있지 않습니다"
                 }
 
-            # 보유 정보 구성
-            quantity = int(holding.get('quantity', 0))
-            avg_price = float(holding.get('avg_price', 0))
-            current_price = float(holding.get('current_price', 0))
+            # 보유 정보 구성 (HantuStock API의 반환 키에 맞게 수정)
+            quantity = int(holding.get('hldg_qty', holding.get('quantity', 0)))
+            avg_price = float(holding.get('pchs_avg_prc', holding.get('avg_price', 0)))
+            current_price = float(holding.get('prpr', holding.get('current_price', 0)))
 
             total_cost = avg_price * quantity
             current_value = current_price * quantity
@@ -128,20 +130,6 @@ class StockAveragingDataProvider:
     ) -> Dict:
         """
         수량 기준 물타기 계산
-
-        Args:
-            symbol: 종목 코드
-            additional_price: 추가 매수 단가
-            additional_quantity: 추가 매수 수량
-
-        Returns:
-            Dict containing:
-                - symbol: 종목 코드
-                - company_name: 종목명
-                - calculation_mode: "quantity"
-                - input: 입력 정보
-                - result: 계산 결과
-                - fetched_at: 계산 시각
         """
         # 보유 정보 조회
         holding_info = self.get_holding_info(symbol)
@@ -151,7 +139,7 @@ class StockAveragingDataProvider:
                 "error": "NOT_HOLDING",
                 "message": holding_info.get("message", "보유 종목이 아닙니다"),
                 "symbol": symbol,
-                "company_name": holding_info.get("company_name", "")
+                "company_name": holding_info.get("company_name", symbol)
             }
 
         # 계산
@@ -165,7 +153,7 @@ class StockAveragingDataProvider:
 
         return {
             "symbol": symbol,
-            "company_name": holding_info["company_name"],
+            "company_name": holding_info.get("company_name", symbol),
             "calculation_mode": "quantity",
             "input": {
                 "current_avg_price": holding["avg_price"],
@@ -196,20 +184,6 @@ class StockAveragingDataProvider:
     ) -> Dict:
         """
         금액 기준 물타기 계산
-
-        Args:
-            symbol: 종목 코드
-            investment_amount: 투자 금액
-            purchase_price: 매수 단가
-
-        Returns:
-            Dict containing:
-                - symbol: 종목 코드
-                - company_name: 종목명
-                - calculation_mode: "amount"
-                - input: 입력 정보 (calculated_quantity 포함)
-                - result: 계산 결과
-                - fetched_at: 계산 시각
         """
         # 보유 정보 조회
         holding_info = self.get_holding_info(symbol)
@@ -219,7 +193,7 @@ class StockAveragingDataProvider:
                 "error": "NOT_HOLDING",
                 "message": holding_info.get("message", "보유 종목이 아닙니다"),
                 "symbol": symbol,
-                "company_name": holding_info.get("company_name", "")
+                "company_name": holding_info.get("company_name", symbol)
             }
 
         # 수량 계산 (소수점 버림)
@@ -237,7 +211,7 @@ class StockAveragingDataProvider:
 
         return {
             "symbol": symbol,
-            "company_name": holding_info["company_name"],
+            "company_name": holding_info.get("company_name", symbol),
             "calculation_mode": "amount",
             "input": {
                 "current_avg_price": holding["avg_price"],
@@ -269,18 +243,6 @@ class StockAveragingDataProvider:
     ) -> Dict:
         """
         계산 결과 저장
-
-        Args:
-            symbol: 종목 코드
-            calculation_result: calculate_by_* 메서드의 반환값
-            input_mode: "quantity" 또는 "amount"
-
-        Returns:
-            Dict containing:
-                - calculation_id: 계산 ID
-                - symbol: 종목 코드
-                - saved_at: 저장 시각
-                - message: 저장 완료 메시지
         """
         try:
             # 종목별 디렉토리 생성
@@ -291,33 +253,37 @@ class StockAveragingDataProvider:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             calculation_id = f"calc_{timestamp}_{symbol}"
 
+            company_name = calculation_result.get("company_name", "")
+            if not company_name:
+                company_name = self._get_company_name(symbol)
+
             # 저장할 데이터 구성
             save_data = {
                 "calculation_id": calculation_id,
                 "symbol": symbol,
-                "company_name": calculation_result.get("company_name", ""),
+                "company_name": company_name,
                 "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "calculation_mode": input_mode,
                 "snapshot": {
-                    "current_avg_price": calculation_result["input"]["current_avg_price"],
-                    "current_quantity": calculation_result["input"]["current_quantity"],
-                    "current_price": calculation_result["input"]["current_price"]
+                    "current_avg_price": calculation_result.get("input", {}).get("current_avg_price", 0),
+                    "current_quantity": calculation_result.get("input", {}).get("current_quantity", 0),
+                    "current_price": calculation_result.get("input", {}).get("current_price", 0)
                 },
                 "input": {},
-                "result": calculation_result["result"]
+                "result": calculation_result.get("result", {})
             }
 
             # 입력 모드별 입력값 저장
             if input_mode == "quantity":
                 save_data["input"] = {
-                    "additional_price": calculation_result["input"]["additional_price"],
-                    "additional_quantity": calculation_result["input"]["additional_quantity"]
+                    "additional_price": calculation_result.get("input", {}).get("additional_price", 0),
+                    "additional_quantity": calculation_result.get("input", {}).get("additional_quantity", 0)
                 }
             else:  # amount
                 save_data["input"] = {
-                    "investment_amount": calculation_result["input"]["investment_amount"],
-                    "purchase_price": calculation_result["input"]["purchase_price"],
-                    "calculated_quantity": calculation_result["input"]["calculated_quantity"]
+                    "investment_amount": calculation_result.get("input", {}).get("investment_amount", 0),
+                    "purchase_price": calculation_result.get("input", {}).get("purchase_price", 0),
+                    "calculated_quantity": calculation_result.get("input", {}).get("calculated_quantity", 0)
                 }
 
             # 파일 저장
@@ -346,25 +312,15 @@ class StockAveragingDataProvider:
     ) -> Dict:
         """
         계산 히스토리 조회
-
-        Args:
-            symbol: 종목 코드
-            limit: 조회 개수 (기본 10개)
-
-        Returns:
-            Dict containing:
-                - symbol: 종목 코드
-                - company_name: 종목명
-                - total_count: 전체 개수
-                - calculations: 계산 히스토리 리스트
         """
         try:
             symbol_dir = self.history_base_path / symbol
 
             if not symbol_dir.exists():
+                c_name = self._get_company_name(symbol)
                 return {
                     "symbol": symbol,
-                    "company_name": self._get_company_name(symbol),
+                    "company_name": c_name if c_name else symbol,
                     "total_count": 0,
                     "calculations": []
                 }
@@ -378,29 +334,40 @@ class StockAveragingDataProvider:
 
             # 제한 개수만큼 로드
             calculations = []
+            saved_company_name = ""
+
             for file_path in json_files[:limit]:
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
 
+                    if not saved_company_name and data.get("company_name"):
+                        saved_company_name = data.get("company_name")
+
                     # 요약 정보만 추출
                     calculations.append({
-                        "calculation_id": data["calculation_id"],
-                        "saved_at": data["saved_at"],
-                        "calculation_mode": data["calculation_mode"],
-                        "input": data["input"],
+                        "calculation_id": data.get("calculation_id", ""),
+                        "saved_at": data.get("saved_at", ""),
+                        "calculation_mode": data.get("calculation_mode", "quantity"),
+                        "input": data.get("input", {}),
                         "result_summary": {
-                            "new_avg_price": data["result"]["new_avg_price"],
-                            "total_quantity": data["result"]["total_quantity"],
-                            "total_cost": data["result"]["total_cost"]
+                            "new_avg_price": data.get("result", {}).get("new_avg_price", 0),
+                            "total_quantity": data.get("result", {}).get("total_quantity", 0),
+                            "total_cost": data.get("result", {}).get("total_cost", 0)
                         }
                     })
                 except Exception:
                     continue
 
+            c_name = saved_company_name
+            if not c_name:
+                c_name = self._get_company_name(symbol)
+            if not c_name:
+                c_name = symbol
+
             return {
                 "symbol": symbol,
-                "company_name": self._get_company_name(symbol),
+                "company_name": c_name,
                 "total_count": len(calculations),
                 "calculations": calculations
             }
@@ -416,14 +383,6 @@ class StockAveragingDataProvider:
     def delete_calculation(self, calculation_id: str) -> Dict:
         """
         계산 결과 삭제
-
-        Args:
-            calculation_id: 삭제할 계산 ID
-
-        Returns:
-            Dict containing:
-                - success: 성공 여부
-                - message: 결과 메시지
         """
         try:
             # calculation_id에서 종목 코드 추출
@@ -455,18 +414,13 @@ class StockAveragingDataProvider:
     def _get_company_name(self, symbol: str) -> str:
         """
         종목명 조회 (HantuStock API 활용)
-
-        Args:
-            symbol: 종목 코드
-
-        Returns:
-            종목명
         """
         try:
             price_info = self.hantu.get_stock_price(symbol)
             if "error" in price_info:
-                return symbol
-            return price_info.get("name", symbol)
+                return ""
+            name = price_info.get("name", "")
+            return name
         except Exception as e:
             print(f"종목명 조회 실패 ({symbol}): {e}")
-            return symbol
+            return ""
