@@ -37,7 +37,10 @@ class WebDetailReport:
 
     def __init__(self):
         """Initialize"""
-        from HantuStock import HantuStock
+        try:
+            from .HantuStock import HantuStock
+        except ImportError:
+            from HantuStock import HantuStock
         self.hantu = HantuStock()
 
         # Gemini (LLM) - narrative + AI 비서
@@ -53,7 +56,10 @@ class WebDetailReport:
             self.genai = None
 
         # 용어 사전 (AI 비서용)
-        from glossary_api import GlossaryAPI
+        try:
+            from .glossary_api import GlossaryAPI
+        except ImportError:
+            from glossary_api import GlossaryAPI
         self.glossary = GlossaryAPI()
 
     # ========================================

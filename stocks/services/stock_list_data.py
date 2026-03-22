@@ -3,19 +3,18 @@
 웹 기획서 Web_01 - 종목 탐색 메인 화면용
 """
 
-import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Optional
 
 try:
-    from pykrx import stock as pykrx_stock
+    # Django 환경을 위한 상대 경로 임포트
+    from .HantuStock import HantuStock
 except ImportError:
-    pykrx_stock = None
-
-try:
-    from HantuStock import HantuStock
-except ImportError:
-    HantuStock = None
+    # 직접 스크립트로 실행할 때를 위한 절대 경로 임포트
+    try:
+        from HantuStock import HantuStock
+    except ImportError:
+        HantuStock = None
 
 
 class StockListDataProvider:
@@ -33,83 +32,50 @@ class StockListDataProvider:
             except Exception as e:
                 print(f"[WARN] HantuStock 초기화 실패: {e}. 보유 종목 조회 제한됨.")
 
-    # ==================== 전체 종목 리스트 ====================
+    # ==================== KIS 랭킹 API ====================
 
-    def get_market_stocks(self, market: str = "ALL", limit: int = 100) -> Dict:
+    def _get_ranking_stocks(self, category: str, limit: int) -> Dict:
         """
-        시장 전체 종목 리스트 조회
+        KIS 랭킹 API로 거래량/등락률 순위 조회
 
         Args:
-            market: 시장 구분 (KOSPI, KOSDAQ, ALL)
-            limit: 최대 조회 개수
+            category: "volume" (거래량) | "return" (등락률)
+            limit: 조회 개수
 
         Returns:
-            dict: 종목 리스트 (ticker, name, current_price, change_rate, volume)
+            get_market_stocks()와 동일한 스키마
         """
-        if pykrx_stock is None:
-            return {"error": "pykrx가 설치되지 않았습니다. pip install pykrx"}
-
+        if not self._hantu:
+            return {"error": "HantuStock 초기화 필요"}
         try:
-            # 최근 거래일 찾기
             today = datetime.now().strftime("%Y%m%d")
-            recent_dates = pykrx_stock.get_previous_business_days(year=datetime.now().year)
+            rankings = self._hantu.get_market_ranking(category=category, limit=limit)
+            
+            # rankings가 에러 딕셔너리인 경우 그대로 반환
+            if isinstance(rankings, dict) and "error" in rankings:
+                return rankings
+                
+            if not rankings:
+                return {"error": "랭킹 데이터 없음 (장외 시간 또는 API 오류)"}
 
-            if not recent_dates.empty:
-                date_str = recent_dates.iloc[-1].strftime("%Y%m%d")
-            else:
-                date_str = today
-
-            # 시장별 OHLCV 조회
-            if market == "ALL":
-                df_kospi = pykrx_stock.get_market_ohlcv(date_str, market="KOSPI")
-                df_kosdaq = pykrx_stock.get_market_ohlcv(date_str, market="KOSDAQ")
-                df = pd.concat([df_kospi, df_kosdaq])
-            else:
-                df = pykrx_stock.get_market_ohlcv(date_str, market=market)
-
-            if df.empty:
-                return {"error": "데이터가 없습니다", "date": date_str}
-
-            # 등락률 계산
-            df['change_rate'] = df['등락률']
-            df['volume'] = df['거래량']
-            df['current_price'] = df['종가']
-
-            # 티커별 종목명 조회
-            tickers = df.index.tolist()
-            names = {}
-            for ticker in tickers[:limit]:
-                try:
-                    name = pykrx_stock.get_market_ticker_name(ticker)
-                    names[ticker] = name
-                except:
-                    names[ticker] = ticker
-
-            # 결과 생성
-            stocks = []
-            for ticker in tickers[:limit]:
-                row = df.loc[ticker]
-                stocks.append({
-                    "ticker": ticker,
-                    "name": names.get(ticker, ticker),
-                    "current_price": int(row['current_price']),
-                    "change_rate": round(float(row['change_rate']), 2),
-                    "volume": int(row['volume'])
-                })
-
-            return {
-                "date": date_str,
-                "market": market,
-                "count": len(stocks),
-                "stocks": stocks
-            }
-
+            stocks = [
+                {
+                    "ticker": item.get("symbol", ""),
+                    "name": item.get("company_name", ""),
+                    "current_price": item.get("current_price", 0),
+                    "change_rate": item.get("change_rate", 0),
+                    "volume": item.get("volume", 0),
+                }
+                for item in rankings
+            ]
+            return {"date": today, "market": "ALL", "count": len(stocks), "stocks": stocks}
         except Exception as e:
             return {"error": str(e)}
 
     # ==================== 정렬 기능 ====================
 
-    def sort_stocks(self, stocks: List[Dict], sort_by: str = "price", order: str = "desc") -> List[Dict]:
+    @staticmethod
+    def sort_stocks(stocks: List[Dict], sort_by: str = "price", order: str = "desc") -> List[Dict]:
         """
         종목 리스트 정렬
 
@@ -136,7 +102,7 @@ class StockListDataProvider:
     def get_sorted_market_stocks(
         self,
         market: str = "ALL",
-        sort_by: str = "price",
+        sort_by: str = "volume",
         order: str = "desc",
         limit: int = 100
     ) -> Dict:
@@ -145,29 +111,29 @@ class StockListDataProvider:
 
         Args:
             market: 시장 구분 (KOSPI, KOSDAQ, ALL)
-            sort_by: 정렬 기준 (price, change_rate, volume)
+            sort_by: 정렬 기준 (change_rate, volume)
             order: 정렬 순서 (asc, desc)
             limit: 최대 조회 개수
 
         Returns:
             dict: 정렬된 종목 리스트
         """
-        result = self.get_market_stocks(market, limit=500)  # 정렬 전 충분히 가져옴
+        if sort_by == "volume":
+            category = "volume"
+        elif sort_by == "change_rate":
+            category = "return"
+        else:
+            return {"error": f"지원하지 않는 정렬 기준입니다: {sort_by} (volume, change_rate만 지원)"}
 
-        if "error" in result:
-            return result
+        ranking_result = self._get_ranking_stocks(category=category, limit=limit)
+        if "error" in ranking_result:
+            return ranking_result
 
-        stocks = result["stocks"]
-        sorted_stocks = self.sort_stocks(stocks, sort_by, order)
-
-        return {
-            "date": result["date"],
-            "market": market,
-            "sort_by": sort_by,
-            "order": order,
-            "count": min(len(sorted_stocks), limit),
-            "stocks": sorted_stocks[:limit]
-        }
+        ranking_result["sort_by"] = sort_by
+        ranking_result["order"] = order
+        if order == "asc":
+            ranking_result["stocks"] = list(reversed(ranking_result["stocks"]))
+        return ranking_result
 
     # ==================== 보유 종목 리스트 ====================
 
@@ -269,7 +235,7 @@ class StockListDataProvider:
                             "change_rate": data.get("change_rate", 0),
                             "volume": data.get("volume", 0)
                         })
-            except:
+            except Exception:
                 continue
 
         return {

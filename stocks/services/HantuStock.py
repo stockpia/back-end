@@ -6,6 +6,7 @@ import time
 import requests
 import json
 from datetime import datetime
+from bs4 import BeautifulSoup
 
 try:
     import FinanceDataReader as fdr
@@ -112,7 +113,7 @@ class HantuStock:
             "tr_id": tr_id,
         }
 
-
+    # noinspection PyMethodMayBeStatic
     def _request(self, url: str, headers: dict, params: dict, *, method: str = "get"):
         backoff = 0.5
         for attempt in range(6):
@@ -282,6 +283,75 @@ class HantuStock:
             }
         }
 
+    # noinspection PyMethodMayBeStatic
+    def get_market_ranking(self, category: str, limit: int = 100) -> list | dict:
+        """
+        시장 랭킹 조회 (네이버 금융 스크래핑 활용)
+        Args:
+            category: "volume" (거래량) | "return" (등락률)
+            limit: 최대 조회 개수
+        """
+        try:
+            if category == "volume":
+                url = "https://finance.naver.com/sise/sise_quant.naver"
+            else:
+                url = "https://finance.naver.com/sise/sise_rise.naver"
+                
+            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+            res.encoding = 'euc-kr'
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            table = soup.find('table', {'class': 'type_2'})
+            if not table:
+                return {"error": "네이버 금융 테이블을 찾을 수 없습니다."}
+                
+            rows = table.find_all('tr')
+            
+            result = []
+            for row in rows:
+                if len(result) >= limit:
+                    break
+                cols = row.find_all('td')
+                if len(cols) >= 10:
+                    a_tag = cols[1].find('a')
+                    if not a_tag:
+                        continue
+                    
+                    href = a_tag.get('href', '')
+                    if 'code=' not in href:
+                        continue
+                        
+                    symbol = href.split('code=')[1]
+                    name = a_tag.text.strip()
+                    
+                    price_str = cols[2].text.strip().replace(',', '')
+                    current_price = int(price_str) if price_str.isdigit() else 0
+                    
+                    rate_str = cols[4].text.strip().replace('%', '').replace('+', '')
+                    try:
+                        change_rate = float(rate_str)
+                    except ValueError:
+                        change_rate = 0.0
+                        
+                    vol_str = cols[5].text.strip().replace(',', '')
+                    volume = int(vol_str) if vol_str.isdigit() else 0
+                    
+                    result.append({
+                        "symbol": symbol,
+                        "company_name": name,
+                        "current_price": current_price,
+                        "change_rate": change_rate,
+                        "volume": volume
+                    })
+                    
+            if not result:
+                return {"error": "네이버 금융 파싱 결과가 비어있습니다."}
+                
+            return result
+            
+        except Exception as e:
+            return {"error": f"네이버 금융 스크래핑 중 에러: {str(e)}"}
+
     @staticmethod
     def get_past_data(ticker: str, days: int = 100):
         if fdr is None:
@@ -426,6 +496,7 @@ class HantuStock:
             ord_dvsn = "00"
         scale = str(quantity_scale).upper()
         if scale == "CASH":
+            # noinspection PyUnboundLocalVariable
             qty = int(float(quantity) / float(px))
         elif scale == "STOCK":
             qty = int(quantity)
@@ -462,6 +533,7 @@ class HantuStock:
             ord_dvsn = "00"
         scale = str(quantity_scale).upper()
         if scale == "CASH":
+            # noinspection PyUnboundLocalVariable
             qty = int(float(quantity) / float(px))
         elif scale == "STOCK":
             qty = int(quantity)

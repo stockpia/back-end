@@ -20,13 +20,17 @@ class StockChartView(APIView):
     symbol: 이름, 종목 코드 둘 다 가능
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
         chart_range = request.query_params.get('range', '3m')
         chart_type = request.query_params.get('type', 'candlestick')
 
         if not symbol.isdigit():
             list_provider = StockListDataProvider()
-            found_code = list_provider.find_ticker_by_name(symbol)
+            all_market_data = list_provider.get_sorted_market_stocks(limit=3000)
+            stocks = all_market_data.get('stocks', [])
+            found_stock = next((s for s in stocks if s.get('name') == symbol), None)
+            found_code = found_stock['ticker'] if found_stock else None
 
             if found_code:
                 symbol = found_code
@@ -54,6 +58,7 @@ class StockChartView(APIView):
 
             return Response(result)
 
+        # noinspection PyBroadException
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -65,21 +70,22 @@ class StockListView(APIView):
     Param: market(ALL|KOSPI|KOSDAQ), sort(change_rate|price|volume), order(desc|asc)
     """
 
+    # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def get(self, request):
-        market = request.query_params.get('market', 'ALL')
+        _ = request.query_params.get('market', 'ALL')
         sort_by = request.query_params.get('sort', 'change_rate')
         order = request.query_params.get('order', 'desc')
 
         try:
             provider = StockListDataProvider()
             result = provider.get_sorted_market_stocks(
-                market=market,
                 sort_by=sort_by,
                 order=order,
                 limit=3000
             )
             return Response(result)
 
+        # noinspection PyBroadException
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -91,6 +97,7 @@ class StockHoldingView(APIView):
     Param: sort(eval_amount|profit_rate|name), order(desc|asc)
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request):
         sort_by = request.query_params.get('sort', 'eval_amount')
         order = request.query_params.get('order', 'desc')
@@ -106,6 +113,7 @@ class StockHoldingView(APIView):
 
             return Response(result)
 
+        # noinspection PyBroadException
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -117,6 +125,7 @@ class StockWatchlistView(APIView):
     * 모델 연동 - 데이터 직접 입력/삭제
     """
 
+    # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def get(self, request):
         watchlist = Watchlist.objects.all().order_by('-created_at')
 
@@ -138,6 +147,7 @@ class StockWatchlistView(APIView):
         return Response(result)
 
     # 관심 종목 추가 (POST)
+    # noinspection PyMethodMayBeStatic
     def post(self, request):
         symbol = request.data.get('symbol')
 
@@ -155,6 +165,7 @@ class StockWatchlistView(APIView):
             return Response({"message": "이미 관심 종목에 있습니다.", "created": False}, status=status.HTTP_200_OK)
 
     # 관심 종목 삭제 (DELETE)
+    # noinspection PyMethodMayBeStatic
     def delete(self, request):
         symbol = request.data.get('symbol')
 
@@ -174,15 +185,17 @@ class StockWatchlistView(APIView):
 
 class BaseStockInfoView(APIView):
     # 부모 클래스(공통 기능)
+    # noinspection PyMethodMayBeStatic
     def get_company_name(self, symbol):
         if symbol.isdigit():
             try:
                 list_provider = StockListDataProvider()
                 all_market_data = list_provider.get_sorted_market_stocks(limit=3000)
                 stocks = all_market_data.get('stocks', [])
-                found_stock = next((s for s in stocks if s['ticker'] == symbol), None)
+                found_stock = next((s for s in stocks if s.get('ticker') == symbol), None)
                 return found_stock['name'] if found_stock else symbol
-            except:
+            # noinspection PyBroadException
+            except Exception:
                 return symbol
         return symbol
 
@@ -193,6 +206,7 @@ class StockNewsView(BaseStockInfoView):
     URL: /api/web/stocks/{symbol}/news?cursor={optional}&limit=20
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
         cursor = request.query_params.get('cursor', '1')
         limit = int(request.query_params.get('limit', 20))
@@ -217,6 +231,7 @@ class StockNewsView(BaseStockInfoView):
                 cache.set(cache_key, response_data, 600)
 
             return Response(response_data)
+        # noinspection PyBroadException
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -227,6 +242,7 @@ class StockCommunityView(BaseStockInfoView):
     URL: /api/web/stocks/{symbol}/community?cursor={optional}&limit=20
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
         cursor = request.query_params.get('cursor', '1')
         limit = int(request.query_params.get('limit', 20))
@@ -243,6 +259,7 @@ class StockCommunityView(BaseStockInfoView):
                 "items": result.get("items", []),
                 "next_cursor": next_cursor
             })
+        # noinspection PyBroadException
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -253,9 +270,8 @@ class StockCommunityLatestView(BaseStockInfoView):
     URL: /api/web/stocks/{symbol}/community/latest?since={timestamp}
     """
 
+    # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def get(self, request, symbol):
-        since = request.query_params.get('since')
-
         try:
             company_name = self.get_company_name(symbol)
             provider = StockNewsDataProvider()
@@ -266,6 +282,7 @@ class StockCommunityLatestView(BaseStockInfoView):
                 "has_new": True,
                 "items": result.get("items", [])
             })
+        # noinspection PyBroadException
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -276,6 +293,7 @@ class AveragingHoldingView(APIView):
     GET /api/web/averaging/holding/<str:symbol>
     """
 
+    # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def get(self, request, symbol):
         cache_key = f"averaging_holding_{symbol}"
         cached_data = cache.get(cache_key)
@@ -299,6 +317,7 @@ class AveragingCalculateQuantityView(APIView):
     POST /api/web/averaging/calculate/quantity
     """
 
+    # noinspection PyMethodMayBeStatic
     def post(self, request):
         symbol = request.data.get('symbol')
         price = request.data.get('additional_price')
@@ -312,6 +331,7 @@ class AveragingCalculateQuantityView(APIView):
             quantity = int(quantity)
             if price <= 0 or quantity <= 0:
                 raise ValueError
+        # noinspection PyBroadException
         except ValueError:
             return Response(
                 {"error": "INVALID_INPUT", "message": "0보다 큰 올바른 숫자를 입력해주세요."},
@@ -331,6 +351,7 @@ class AveragingCalculateAmountView(APIView):
     POST /api/web/averaging/calculate/amount
     """
 
+    # noinspection PyMethodMayBeStatic
     def post(self, request):
         symbol = request.data.get('symbol')
         amount = request.data.get('investment_amount')
@@ -343,6 +364,7 @@ class AveragingCalculateAmountView(APIView):
             price = float(price)
             if amount <= 0 or price <= 0:
                 raise ValueError
+        # noinspection PyBroadException
         except ValueError:
             return Response(
                 {"error": "INVALID_INPUT", "message": "0보다 큰 올바른 숫자를 입력해주세요."},
@@ -364,6 +386,7 @@ class AveragingSaveView(APIView):
     POST /api/web/averaging/save
     """
 
+    # noinspection PyMethodMayBeStatic
     def post(self, request):
         symbol = request.data.get('symbol')
         calc_mode = request.data.get('calculation_mode')
@@ -391,11 +414,13 @@ class AveragingHistoryView(APIView):
     GET /api/web/averaging/history/<str:symbol>?limit=10
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
         # 쿼리 파라미터에서 limit 추출 (기본 10개)
         # [cite: 626]
         try:
             limit = int(request.query_params.get('limit', 10))
+        # noinspection PyBroadException
         except ValueError:
             limit = 10
 
@@ -418,6 +443,7 @@ class StockDetailReportView(APIView):
     GET /api/web/stocks/<str:symbol>/detail
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
         user_id = request.query_params.get('user_id', 'default_user')
         period = request.query_params.get('period', '1m')
@@ -443,6 +469,7 @@ class StockDetailReportView(APIView):
             cache.set(cache_key, result, 3600)
             return Response(result, status=status.HTTP_200_OK)
 
+        # noinspection PyBroadException
         except Exception as e:
             print(f"[API 500 에러 원인 추적] {e}")
 
@@ -459,22 +486,45 @@ class StockReportView(APIView):
     GET /api/web/stocks/<str:symbol>/report
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
-        user_id = request.query_params.get('user_id', 'default_user')
-        company_name = request.query_params.get('company_name', symbol)
+        try:
+            user_id = request.query_params.get('user_id', 'default_user')
 
-        # 30분(1800초) 캐싱
-        cache_key = f"web05_report_{symbol}_{user_id}"
-        cached_data = cache.get(cache_key)
+            # 1. 프론트엔드에서 넘어온 값을 우선적으로 받는다.
+            company_name = request.query_params.get('company_name')
 
-        if cached_data:
-            return Response(cached_data)
-        web_report = WebStockReport()
-        result = web_report.get_report(symbol, company_name, user_id)
-        if "error" in result:
-            return Response(result, status=status.HTTP_400_BAD_REQUEST)
-        cache.set(cache_key, result, 1800)
-        return Response(result)
+            # 2. 값이 아예 없거나, 실수로 종목 코드가 이름 자리에 들어왔을 때만 API로 검색을 시도한다.
+            if not company_name or company_name == symbol or company_name.isdigit():
+                chart_provider = StockChartDataProvider()
+                info = chart_provider.get_stock_info(symbol)
+                company_name = info.get('company_name', symbol)
+
+            cache_key = f"web05_report_{symbol}_{user_id}"
+
+            # 테스트를 위해 임시로 캐시를 비활성화해 둔 상태
+            # cached_data = cache.get(cache_key)
+            # if cached_data:
+            #    return Response(cached_data)
+
+            web_report = WebStockReport()
+            result = web_report.get_report(symbol, company_name, user_id)
+
+            if "error" in result:
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+            cache.set(cache_key, result, 1800)
+            return Response(result)
+
+        # noinspection PyBroadException
+        except Exception as e:
+            print(f"[API 500 에러 원인 추적 - StockReportView] {e}")
+
+            error_response = {
+                "error": str(e),
+                "message": "리포트 생성 중 서버 내부 오류가 발생했습니다."
+            }
+            return Response(error_response, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class StockFavoriteToggleView(APIView):
@@ -483,6 +533,7 @@ class StockFavoriteToggleView(APIView):
     POST /api/web/stocks/<str:symbol>/favorite
     """
 
+    # noinspection PyMethodMayBeStatic
     def post(self, request, symbol):
         user_id = request.data.get('user_id', 'default_user')
         company_name = request.data.get('company_name', symbol)
@@ -505,6 +556,7 @@ class StockFavoriteListView(APIView):
     GET /api/web/favorites
     """
 
+    # noinspection PyMethodMayBeStatic
     def get(self, request):
         user_id = request.query_params.get('user_id', 'default_user')
         web_report = WebStockReport()

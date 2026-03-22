@@ -21,14 +21,20 @@ except ImportError:
     fdr = None
 
 try:
-    from HantuStock import HantuStock
+    from .HantuStock import HantuStock
 except ImportError:
-    HantuStock = None
+    try:
+        from HantuStock import HantuStock
+    except ImportError:
+        HantuStock = None
 
 try:
-    from dart_client import DartClient
+    from .dart_client import DartClient
 except ImportError:
-    DartClient = None
+    try:
+        from dart_client import DartClient
+    except ImportError:
+        DartClient = None
 
 try:
     import plotly.graph_objects as go

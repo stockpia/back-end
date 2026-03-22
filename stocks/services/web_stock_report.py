@@ -40,7 +40,7 @@ class WebStockReport:
 
     def __init__(self):
         """Initialize"""
-        from stock_chart_data import StockChartDataProvider
+        from .stock_chart_data import StockChartDataProvider
         self.chart_provider = StockChartDataProvider()
 
         # Gemini (LLM)
