@@ -1,3 +1,5 @@
+import requests
+import urllib.parse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -9,6 +11,106 @@ from .services.stock_news_data import StockNewsDataProvider
 from .services.stock_averaging_data import StockAveragingDataProvider
 from .services.web_stock_report import WebStockReport
 from .services.web_detail_report import WebDetailReport
+
+
+def resolve_symbol(symbol_or_name: str) -> str:
+    """
+    이름(예: 삼성전자)이 들어오면 종목코드(005930)로 변환,
+    종목코드가 들어오면 그대로 반환.
+    """
+    if symbol_or_name.isdigit():
+        return symbol_or_name
+
+    target = symbol_or_name.replace(" ", "").upper()
+    debug_logs = []
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://finance.naver.com/'
+    }
+
+    # 1. 네이버 금융 자동완성 API 활용
+    url = "https://ac.finance.naver.com/ac"
+    params = {
+        'q': symbol_or_name,
+        'q_enc': 'utf-8',
+        'st': '111',
+        'r_format': 'json',
+        'r_enc': 'utf-8'
+    }
+    
+    try:
+        res = requests.get(url, params=params, headers=headers, timeout=5)
+        debug_logs.append(f"AC Status: {res.status_code}")
+        if res.status_code == 200:
+            data = res.json()
+            items = data.get('items', [])
+            for category in items:
+                for item in category:
+                    if len(item) >= 2 and item[1].isdigit():
+                        return str(item[1])
+            debug_logs.append("AC No items found")
+    except Exception as e:
+        debug_logs.append(f"AC Error: {str(e)}")
+
+    # 2. 네이버 금융 검색 스크래핑 (EUC-KR 인코딩 필수)
+    try:
+        from bs4 import BeautifulSoup
+        encoded_query = urllib.parse.quote(symbol_or_name.encode('euc-kr'))
+        search_url = f"https://finance.naver.com/search/search.naver?query={encoded_query}"
+        
+        res = requests.get(search_url, headers=headers, timeout=5)
+        debug_logs.append(f"Search Status: {res.status_code}")
+        
+        # 검색어가 완벽히 일치하여 바로 종목 페이지로 리다이렉트 된 경우
+        if 'code=' in res.url:
+            return res.url.split('code=')[1].split('&')[0]
+            
+        # 검색 결과 리스트 페이지로 간 경우 첫 번째 결과의 href 추출
+        res.encoding = 'euc-kr'
+        soup = BeautifulSoup(res.text, 'html.parser')
+        a_tags = soup.select("td.tit a")
+        if a_tags:
+            href = a_tags[0].get('href', '')
+            if 'code=' in href:
+                return href.split('code=')[1].split('&')[0]
+        debug_logs.append("Search No tags found")
+    except Exception as e:
+        debug_logs.append(f"Search Error: {str(e)}")
+
+    # 3. pykrx 라이브러리를 활용한 Fallback
+    try:
+        from pykrx import stock as pystock
+        from datetime import datetime
+        from dateutil.relativedelta import relativedelta
+        
+        today = datetime.now()
+        found_date = False
+        for i in range(10):
+            d = (today - relativedelta(days=i)).strftime("%Y%m%d")
+            kospi_tickers = pystock.get_market_ticker_list(d, market="KOSPI")
+            if kospi_tickers:
+                found_date = True
+                kosdaq_tickers = pystock.get_market_ticker_list(d, market="KOSDAQ")
+                all_tickers = kospi_tickers + kosdaq_tickers
+                
+                for t in all_tickers:
+                    name = pystock.get_market_ticker_name(t)
+                    if name and name.replace(" ", "").upper() == target:
+                        return str(t)
+                        
+                for t in all_tickers:
+                    name = pystock.get_market_ticker_name(t)
+                    if name and target in name.replace(" ", "").upper():
+                        return str(t)
+                break
+        if not found_date:
+            debug_logs.append("pykrx No trading dates found")
+    except Exception as e:
+        debug_logs.append(f"pykrx Error: {str(e)}")
+
+    # 변환 실패 시 디버그 로그 반환
+    return f"ERROR: {' | '.join(debug_logs)}"
 
 
 class StockChartView(APIView):
@@ -24,20 +126,20 @@ class StockChartView(APIView):
         chart_range = request.query_params.get('range', '3m')
         chart_type = request.query_params.get('type', 'candlestick')
 
-        if not symbol.isdigit():
-            list_provider = StockListDataProvider()
-            all_market_data = list_provider.get_sorted_market_stocks(limit=3000)
-            stocks = all_market_data.get('stocks', [])
-            found_stock = next((s for s in stocks if s.get('name') == symbol), None)
-            found_code = found_stock['ticker'] if found_stock else None
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
 
-            if found_code:
-                symbol = found_code
-            else:
-                return Response(
-                    {"error": f"'{symbol}' 종목을 찾을 수 없습니다."},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+        if symbol.startswith("ERROR:"):
+            return Response(
+                {"error": f"'{original_symbol}' 종목 검색 실패. 상세 사유: {symbol}"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not symbol.isdigit():
+            return Response(
+                {"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         cache_key = f"chart_{symbol}_{chart_range}_{chart_type}"
         cached_data = cache.get(cache_key)
@@ -121,16 +223,18 @@ class BaseStockInfoView(APIView):
     # 부모 클래스(공통 기능)
     # noinspection PyMethodMayBeStatic
     def get_company_name(self, symbol):
-        if symbol.isdigit():
-            try:
-                list_provider = StockListDataProvider()
-                all_market_data = list_provider.get_sorted_market_stocks(limit=3000)
-                stocks = all_market_data.get('stocks', [])
-                found_stock = next((s for s in stocks if s.get('ticker') == symbol), None)
-                return found_stock['name'] if found_stock else symbol
-            # noinspection PyBroadException
-            except Exception:
-                return symbol
+        if not symbol.isdigit():
+            return symbol
+            
+        try:
+            from .services.HantuStock import HantuStock
+            h = HantuStock()
+            price_info = h.get_stock_price(symbol)
+            if "error" not in price_info and price_info.get("name"):
+                return price_info["name"]
+        except Exception:
+            pass
+            
         return symbol
 
 
@@ -145,6 +249,15 @@ class StockNewsView(BaseStockInfoView):
         cursor = request.query_params.get('cursor', '1')
         limit = int(request.query_params.get('limit', 20))
         page = int(cursor) if cursor and cursor.isdigit() else 1
+
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         cache_key = f"news_{symbol}_{page}"
         cached_data = cache.get(cache_key)
@@ -186,6 +299,15 @@ class StockCommunityView(BaseStockInfoView):
         limit = int(request.query_params.get('limit', 20))
         page = int(cursor) if cursor and cursor.isdigit() else 1
 
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
         try:
             company_name = self.get_company_name(symbol)
             provider = StockNewsDataProvider()
@@ -214,6 +336,15 @@ class StockCommunityLatestView(BaseStockInfoView):
 
     # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def get(self, request, symbol):
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
         try:
             company_name = self.get_company_name(symbol)
             provider = StockNewsDataProvider()
@@ -241,6 +372,15 @@ class AveragingHoldingView(APIView):
 
     # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def get(self, request, symbol):
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
         cache_key = f"averaging_holding_{symbol}"
         cached_data = cache.get(cache_key)
 
@@ -271,6 +411,15 @@ class AveragingCalculateQuantityView(APIView):
 
         if not all([symbol, price, quantity]):
             return Response({"error": "INVALID_INPUT", "message": "모든 필드를 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
             price = float(price)
@@ -305,6 +454,16 @@ class AveragingCalculateAmountView(APIView):
 
         if not all([symbol, amount, price]):
             return Response({"error": "INVALID_INPUT", "message": "모든 필드를 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
         try:
             amount = float(amount)
             price = float(price)
@@ -343,8 +502,16 @@ class AveragingSaveView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
         provider = StockAveragingDataProvider()
-        # 프론트가 보낸 JSON 구조 그대로 통째로 넘겨서 저장
         result = provider.save_calculation(symbol, request.data, calc_mode)
 
         if result.get("error"):
@@ -364,6 +531,15 @@ class AveragingHistoryView(APIView):
 
     # noinspection PyMethodMayBeStatic
     def get(self, request, symbol):
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
         # 쿼리 파라미터에서 limit 추출 (기본 10개)
         try:
             limit = int(request.query_params.get('limit', 10))
@@ -382,7 +558,7 @@ class AveragingHistoryView(APIView):
         
         if result.get("error"):
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
-
+            
         cache.set(cache_key, result, 300)
         return Response(result)
 
@@ -397,6 +573,15 @@ class StockDetailReportView(APIView):
     def get(self, request, symbol):
         user_id = request.query_params.get('user_id', 'default_user')
         period = request.query_params.get('period', '1m')
+
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit() and symbol != "ALL":
+            return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         cache_key = f"web04_detail_{symbol}_{user_id}_{period}"
         cached_data = cache.get(cache_key)
@@ -441,6 +626,15 @@ class StockReportView(APIView):
         try:
             user_id = request.query_params.get('user_id', 'default_user')
 
+            original_symbol = symbol
+            symbol = resolve_symbol(symbol)
+            
+            if symbol.startswith("ERROR:"):
+                return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+            if not symbol.isdigit():
+                return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
             # 1. 프론트엔드에서 넘어온 값을 우선적으로 받는다.
             company_name = request.query_params.get('company_name')
 
@@ -448,7 +642,7 @@ class StockReportView(APIView):
             if not company_name or company_name == symbol or company_name.isdigit():
                 chart_provider = StockChartDataProvider()
                 info = chart_provider.get_stock_info(symbol)
-                company_name = info.get('company_name', symbol)
+                company_name = info.get('company_name', original_symbol if not original_symbol.isdigit() else symbol)
 
             cache_key = f"web05_report_{symbol}_{user_id}"
 
@@ -485,8 +679,17 @@ class StockFavoriteToggleView(APIView):
 
     # noinspection PyMethodMayBeStatic
     def post(self, request, symbol):
+        original_symbol = symbol
+        symbol = resolve_symbol(symbol)
+        
+        if symbol.startswith("ERROR:"):
+            return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not symbol.isdigit():
+            return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
         user_id = request.data.get('user_id', 'default_user')
-        company_name = request.data.get('company_name', symbol)
+        company_name = request.data.get('company_name', original_symbol if not original_symbol.isdigit() else symbol)
         action = request.data.get('action')  # "add" or "remove"
         web_report = WebStockReport()
 
