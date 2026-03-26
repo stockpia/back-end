@@ -47,7 +47,7 @@ urlpatterns = [
     path('', health_check),
 
     path('admin/', admin.site.urls),
-    #path('api/web/', include('stocks.urls')),
+    path('api/web/', include('stocks.urls')),
     path('api/', include(('sample_swagger.urls', 'api'))),
     path('accounts/login/', admin.site.login),
     
