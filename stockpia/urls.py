@@ -43,6 +43,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/web/', include('stocks.urls')),
     path('api/', include(('sample_swagger.urls', 'api'))),
+    path('accounts/login/', admin.site.login),
     
     # Swagger URLs (DEBUG 조건 해제)
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

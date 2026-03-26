@@ -137,3 +137,5 @@ CACHES = {
 # CORS 설정
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+LOGIN_URL = '/admin/login/'
