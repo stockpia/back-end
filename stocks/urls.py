@@ -63,7 +63,7 @@ urlpatterns = [
 
     # web05-2 관심 종목 추가/해제
     # POST /api/web/stocks/{symbol}/favorite
-    path('stocks/<str:symbol>/favorite', StockFavoriteToggleView.as_view(), name='stock-favorite-toggle'),
+    #path('stocks/<str:symbol>/favorite', StockFavoriteToggleView.as_view(), name='stock-favorite-toggle'),
 
     # web05-3 관심 종목 목록 조회
     # GET /api/web/favorites
