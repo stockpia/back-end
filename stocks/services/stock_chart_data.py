@@ -45,7 +45,7 @@ except ImportError:
 
 
 # 모듈 레벨 HantuStock 싱글톤 (프로세스 내 1회만 초기화, 토큰 재발급 방지)
-_hantu_shared = None
+#_hantu_shared = None
 
 
 class StockChartDataProvider:
@@ -63,14 +63,13 @@ class StockChartDataProvider:
 
         self._hantu = hantu_stock
         if hantu_stock is None and HantuStock is not None:
-            if _hantu_shared is not None:
-                self._hantu = _hantu_shared  # 기존 인스턴스 재사용 (토큰 재발급 없음)
-            else:
-                try:
-                    _hantu_shared = HantuStock()
-                    self._hantu = _hantu_shared
-                except Exception as e:
-                    print(f"[WARN] HantuStock 초기화 실패: {e}. 일부 기능 제한됨.")
+            try:
+                self._hantu = HantuStock()
+            except Exception as e:
+                print(f"[WARN] HantuStock 초기화 실패: {e}. 일부 기능 제한됨.")
+                self._hantu = None
+        else:
+            self._hantu = hantu_stock
 
         # DART 클라이언트 (부채비율/현금흐름 등)
         self._dart = None
