@@ -67,7 +67,7 @@ class HantuStock:
             if self._env == "prod"
             else "https://openapivts.koreainvestment.com:29443"
         )
-        self._access_token = self._get_access_token()
+        self._access_token = None
 
     # -------------------- 내부 공통 --------------------
     def _tr(self, key: str) -> str:
@@ -105,6 +105,9 @@ class HantuStock:
         raise RuntimeError("Failed to get access token after retries")
 
     def _header(self, tr_id: str) -> dict:
+        if self._access_token is None:
+            self._access_token = self._get_access_token()
+
         return {
             "content-type": "application/json",
             "appkey": self._api_key,
