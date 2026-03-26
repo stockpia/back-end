@@ -15,7 +15,7 @@ django-cors-headers==4.9.0
 django-rest-framework==0.1.0
 djangorestframework==3.16.1
 drf-yasg==1.21.14
-finance-datareader==0.9.101
+finance-datareader==0.9.102
 fonttools==4.61.1
 google-ai-generativelanguage==0.6.15
 google-api-core==2.25.2
@@ -50,7 +50,7 @@ pyasn1_modules==0.4.2
 pycparser==3.0
 pydantic==2.12.5
 pydantic_core==2.41.5
-pykrx==1.2.3
+pykrx==1.2.4
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
