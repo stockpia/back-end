@@ -17,6 +17,7 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import include, path, re_path
+from django.http import HttpResponse
 from django.conf import settings
 from rest_framework import routers
 from rest_framework import permissions
@@ -39,7 +40,12 @@ schema_view = get_schema_view(
     authentication_classes=[],
 )
 
+def health_check(request):
+    return HttpResponse("Stockpia API Server is Running", status=200)
+
 urlpatterns = [
+    path('', health_check),
+
     path('admin/', admin.site.urls),
     path('api/web/', include('stocks.urls')),
     path('api/', include(('sample_swagger.urls', 'api'))),
