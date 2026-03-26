@@ -5,12 +5,19 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.core.cache import cache
 
+print("1. views.py 로딩 시작")
 from .services.stock_chart_data import StockChartDataProvider
+print("2. chart_data 통과")
 from .services.stock_list_data import StockListDataProvider
+print("3. list_data 통과")
 from .services.stock_news_data import StockNewsDataProvider
+print("4. news_data 통과")
 from .services.stock_averaging_data import StockAveragingDataProvider
+print("5. averaging 통과")
 from .services.web_stock_report import WebStockReport
+print("6. web_report 통과")
 from .services.web_detail_report import WebDetailReport
+print("7. 모두 통과 완료!")
 
 
 def resolve_symbol(symbol_or_name: str) -> str:
