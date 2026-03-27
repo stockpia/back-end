@@ -26,6 +26,8 @@ load_dotenv()
 
 
 class HantuStock:
+    _shared_access_token = None
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -67,7 +69,7 @@ class HantuStock:
             if self._env == "prod"
             else "https://openapivts.koreainvestment.com:29443"
         )
-        self._access_token = None
+        # self._access_token = None
 
     # -------------------- 내부 공통 --------------------
     def _tr(self, key: str) -> str:
@@ -105,14 +107,14 @@ class HantuStock:
         raise RuntimeError("Failed to get access token after retries")
 
     def _header(self, tr_id: str) -> dict:
-        if self._access_token is None:
-            self._access_token = self._get_access_token()
+        if HantuStock._shared_access_token is None:
+            HantuStock._shared_access_token = self._get_access_token()
 
         return {
             "content-type": "application/json",
             "appkey": self._api_key,
             "appsecret": self._secret_key,
-            "authorization": f"Bearer {self._access_token}",
+            "authorization": f"Bearer {HantuStock._shared_access_token}",
             "tr_id": tr_id,
         }
 
