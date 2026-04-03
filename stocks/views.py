@@ -20,6 +20,9 @@ def resolve_symbol(symbol_or_name: str) -> str:
     """
     if symbol_or_name.isdigit():
         return symbol_or_name
+    
+    if symbol_or_name.upper() == "ALL":
+        return "ALL"
 
     target = symbol_or_name.replace(" ", "").upper()
     debug_logs = []
@@ -669,6 +672,69 @@ class StockReportView(APIView):
                 "message": "리포트 생성 중 서버 내부 오류가 발생했습니다."
             }
             return Response(error_response, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+from .models import KisAccount
+
+
+class KisAccountLinkView(APIView):
+    """
+    한국투자증권 계좌 연동 API
+    POST /api/web/accounts/link
+    """
+
+    def post(self, request):
+        user_id = request.data.get('user_id', 'default_user')
+        name = request.data.get('name')
+        birthdate = request.data.get('birthdate')
+        phone = request.data.get('phone')
+        account_number = request.data.get('account_number')
+        app_key = request.data.get('app_key')
+        app_secret_key = request.data.get('app_secret_key')
+        env = request.data.get('env', 'vps')
+
+        if not all([name, birthdate, phone, account_number, app_key, app_secret_key]):
+            return Response({"error": "모든 필수 정보를 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 유효성 검사 (HantuStock으로 테스트 연결해보기)
+        try:
+            from .services.HantuStock import HantuStock
+            # 잔고 조회를 찔러봄
+            test_hantu = HantuStock(
+                api_key=app_key,
+                secret_key=app_secret_key,
+                account_id=account_number[:8] if '-' in account_number else account_number,
+                env=env  # 모의투자 또는 실전투자
+            )
+            # 토큰 발급 테스트 (실패시 예외 발생)
+            if not test_hantu._access_token:
+                raise ValueError("토큰 발급 실패")
+        except Exception as e:
+            return Response({
+                "error": "계좌 연동 실패. 입력하신 앱 키와 시크릿 키, 계좌번호를 다시 확인해주세요.",
+                "detail": str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # DB 저장 (기존 정보가 있으면 덮어쓰기)
+        account, created = KisAccount.objects.update_or_create(
+            user_id=user_id,
+            defaults={
+                'name': name,
+                'birthdate': birthdate,
+                'phone': phone,
+                'account_number': account_number,
+                'app_key': app_key,
+                'app_secret_key': app_secret_key,
+                'env': env
+            }
+        )
+
+        return Response({
+            "message": "한국투자증권 계좌 연동이 성공적으로 완료되었습니다.",
+            "name": account.name,
+            "account_number": account.account_number
+        }, status=status.HTTP_201_CREATED)
+
 
 
 class StockFavoriteToggleView(APIView):

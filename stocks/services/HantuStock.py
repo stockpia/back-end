@@ -33,6 +33,7 @@ class HantuStock:
         api_key: str | None = None,
         secret_key: str | None = None,
         account_id: str | None = None,
+        account_suffix: str | None = None,
         *,
         env: str | None = None,
     ):
@@ -44,7 +45,7 @@ class HantuStock:
         self._api_key = api_key or os.getenv("KIS_APP_KEY", "").strip()
         self._secret_key = secret_key or os.getenv("KIS_APP_SECRET", "").strip()
         self._account_id = account_id or os.getenv("KIS_ACCOUNT_ID", "").strip()
-        self._account_suffix = os.getenv("KIS_ACCOUNT_SUFFIX", "01").strip() or "01"
+        self._account_suffix = account_suffix or os.getenv("KIS_ACCOUNT_SUFFIX", "01").strip() or "01"
 
         _env = (env or os.getenv("KIS_ENV", "prod")).strip().lower()
         if _env not in {"prod", "vps", "paper", "demo", "sandbox", "vts"}:

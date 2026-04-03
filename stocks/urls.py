@@ -5,6 +5,7 @@ from .views import (StockChartView, StockListView, StockHoldingView,# StockWatch
                     AveragingSaveView, AveragingHistoryView,
                     StockDetailReportView,
                     StockReportView, StockFavoriteToggleView, StockFavoriteListView,
+                    KisAccountLinkView,
                     )
 
 urlpatterns = [
@@ -68,4 +69,8 @@ urlpatterns = [
     # web05-3 관심 종목 목록 조회
     # GET /api/web/favorites
     path('favorites', StockFavoriteListView.as_view(), name='stock-favorite-list'),
+
+    # 계좌 연동 API
+    # POST /api/web/accounts/link
+    path('accounts/link', KisAccountLinkView.as_view(), name='account-link'),
 ]
