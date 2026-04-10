@@ -5,7 +5,7 @@ from .views import (StockChartView, StockListView, StockHoldingView,# StockWatch
                     AveragingSaveView, AveragingHistoryView,
                     StockDetailReportView,
                     StockReportView, StockFavoriteToggleView, StockFavoriteListView,
-                    KisAccountLinkView,
+                    KisAccountSignUpView, KisAccountSignInView, KisAccountSignOutView,
                     )
 
 urlpatterns = [
@@ -70,7 +70,15 @@ urlpatterns = [
     # GET /api/web/favorites
     path('favorites', StockFavoriteListView.as_view(), name='stock-favorite-list'),
 
-    # 계좌 연동 API
-    # POST /api/web/accounts/link
-    path('accounts/link', KisAccountLinkView.as_view(), name='account-link'),
+    # 계좌 연동 및 회원가입 API
+    # POST /api/web/accounts/signup
+    path('accounts/signup', KisAccountSignUpView.as_view(), name='account-signup'),
+    
+    # 이름과 전화번호로 로그인 API
+    # POST /api/web/accounts/signin
+    path('accounts/signin', KisAccountSignInView.as_view(), name='account-signin'),
+
+    # 로그아웃(계좌 연동 해제) API
+    # POST /api/web/accounts/signout
+    path('accounts/signout', KisAccountSignOutView.as_view(), name='account-signout'),
 ]

@@ -48,6 +48,15 @@ def resolve_symbol(symbol_or_name: str) -> str:
         if res.status_code == 200:
             data = res.json()
             items = data.get('items', [])
+            
+            # 1순위: 정확히 일치하는 종목 찾기
+            for category in items:
+                for item in category:
+                    if len(item) >= 2 and item[1].isdigit():
+                        if item[0] == symbol_or_name:
+                            return str(item[1])
+                            
+            # 2순위: 첫 번째 종목 반환
             for category in items:
                 for item in category:
                     if len(item) >= 2 and item[1].isdigit():
@@ -56,7 +65,7 @@ def resolve_symbol(symbol_or_name: str) -> str:
     except Exception as e:
         debug_logs.append(f"AC Error: {str(e)}")
 
-    # 2. 네이버 금융 검색 스크래핑 (EUC-KR 인코딩 필수)
+    # 2. 네이버 금융 검색 스크래핑
     try:
         from bs4 import BeautifulSoup
         encoded_query = urllib.parse.quote(symbol_or_name.encode('euc-kr'))
@@ -70,10 +79,22 @@ def resolve_symbol(symbol_or_name: str) -> str:
             return res.url.split('code=')[1].split('&')[0]
             
         # 검색 결과 리스트 페이지로 간 경우 첫 번째 결과의 href 추출
-        res.encoding = 'euc-kr'
-        soup = BeautifulSoup(res.text, 'html.parser')
+        # utf-8 또는 euc-kr 중 하나로 렌더링되므로, 자동 감지된 인코딩 사용
+        soup = BeautifulSoup(res.content, 'html.parser', from_encoding='euc-kr')
+        
+        # 주식 종목 검색 결과 테이블 파싱
+        # td.tit 클래스를 가진 a 태그 찾기
         a_tags = soup.select("td.tit a")
         if a_tags:
+            for a_tag in a_tags:
+                href = a_tag.get('href', '')
+                if 'code=' in href:
+                    # 일치하는 이름이 있는지 확인 (카카오, 두산 등 짧은 이름 매칭)
+                    name = a_tag.text.strip().replace(" ", "").upper()
+                    if name == target or target in name:
+                        return href.split('code=')[1].split('&')[0]
+            
+            # 정확히 일치하는 걸 못찾았으면 첫번째 결과 반환
             href = a_tags[0].get('href', '')
             if 'code=' in href:
                 return href.split('code=')[1].split('&')[0]
@@ -677,10 +698,10 @@ class StockReportView(APIView):
 from .models import KisAccount
 
 
-class KisAccountLinkView(APIView):
+class KisAccountSignUpView(APIView):
     """
-    한국투자증권 계좌 연동 API
-    POST /api/web/accounts/link
+    한국투자증권 계좌 연동 및 회원가입 API
+    POST /api/web/accounts/signup
     """
 
     def post(self, request):
@@ -728,13 +749,78 @@ class KisAccountLinkView(APIView):
                 'env': env
             }
         )
+        
+        message = "한국투자증권 계좌 연동 및 회원가입이 성공적으로 완료되었습니다." if created else "계좌 정보가 성공적으로 업데이트되었습니다."
 
         return Response({
-            "message": "한국투자증권 계좌 연동이 성공적으로 완료되었습니다.",
+            "message": message,
             "name": account.name,
             "account_number": account.account_number
-        }, status=status.HTTP_201_CREATED)
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
+
+class KisAccountSignInView(APIView):
+    """
+    이름과 전화번호로 로그인 API
+    POST /api/web/accounts/signin
+    """
+    def post(self, request):
+        name = request.data.get('name')
+        phone = request.data.get('phone')
+
+        if not all([name, phone]):
+            return Response({"error": "이름과 전화번호를 모두 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            account = KisAccount.objects.get(name=name, phone=phone)
+            
+            # "touch" the object to update the `updated_at` timestamp
+            account.save()
+
+            return Response({
+                "message": "로그인에 성공했습니다.",
+                "name": account.name,
+                "account_number": account.account_number,
+                "user_id": account.user_id
+            }, status=status.HTTP_200_OK)
+        except KisAccount.DoesNotExist:
+            return Response({
+                "error": "일치하는 사용자 정보가 없습니다. 회원가입을 먼저 진행해주세요."
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                "error": "로그인 중 오류가 발생했습니다.",
+                "detail": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class KisAccountSignOutView(APIView):
+    """
+    로그아웃 API
+    POST /api/web/accounts/signout
+    """
+
+    def post(self, request):
+        user_id = request.data.get('user_id')
+
+        if not user_id:
+            return Response({"error": "user_id가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            account = KisAccount.objects.get(user_id=user_id)
+            account.delete()
+            return Response({
+                "message": "로그아웃 되었습니다."
+            }, status=status.HTTP_200_OK)
+        except KisAccount.DoesNotExist:
+            return Response({
+                "error": "연동된 계좌 정보를 찾을 수 없습니다."
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                "error": "로그아웃 중 오류가 발생했습니다.",
+                "detail": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class StockFavoriteToggleView(APIView):
@@ -778,6 +864,13 @@ class StockFavoriteListView(APIView):
     # noinspection PyMethodMayBeStatic
     def get(self, request):
         user_id = request.query_params.get('user_id', 'default_user')
+        
+        # 24시간 지난 계좌 삭제 (자동 로그아웃 처리)
+        from .models import KisAccount
+        expired_accounts = [account for account in KisAccount.objects.all() if account.is_expired()]
+        for account in expired_accounts:
+            account.delete()
+
         web_report = WebStockReport()
         result = web_report.get_favorites(user_id)
         return Response(result)

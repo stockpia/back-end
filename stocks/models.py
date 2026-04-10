@@ -1,4 +1,6 @@
 from django.db import models
+from django.utils import timezone
+from datetime import timedelta
 
 class KisAccount(models.Model):
     """한국투자증권 연동 계좌 정보"""
@@ -17,6 +19,10 @@ class KisAccount(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def is_expired(self):
+        """24시간이 지났는지 확인"""
+        return timezone.now() > self.updated_at + timedelta(hours=24)
 
     def __str__(self):
         return f"{self.name} - {self.account_number}"
