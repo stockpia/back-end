@@ -1,0 +1,40 @@
+services:
+  # 1. Web Service: HTTP 요청과 웹소켓 연결을 처리
+  - type: web
+    name: stockpia-backend
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "daphne -b 0.0.0.0 -p $PORT stockpia.asgi:application"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DJANGO_SETTINGS_MODULE
+        value: stockpia.settings
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: stockpia-redis
+          property: connectionString
+
+  # 2. Background Worker: 실시간 주가 업데이트 스크립트 실행
+  - type: worker
+    name: stock-ticker-worker
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python manage.py run_stock_ticker"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DJANGO_SETTINGS_MODULE
+        value: stockpia.settings
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: stockpia-redis
+          property: connectionString
+
+  # 3. Redis Service: 채널 레이어를 위한 Redis 데이터베이스
+  - type: redis
+    name: stockpia-redis
+    ipAllowList: [] # 모든 IP에서 접근 허용 (서비스 내부 통신용)
+    plan: free # 무료 티어 사용
