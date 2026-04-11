@@ -7,7 +7,7 @@ services:
     startCommand: "daphne -b 0.0.0.0 -p $PORT stockpia.asgi:application"
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.4
+        value: 3.11
       - key: DJANGO_SETTINGS_MODULE
         value: stockpia.settings
       - key: REDIS_URL
@@ -24,7 +24,7 @@ services:
     startCommand: "python manage.py run_stock_ticker"
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.4
+        value: 3.11
       - key: DJANGO_SETTINGS_MODULE
         value: stockpia.settings
       - key: REDIS_URL
