@@ -58,8 +58,8 @@ class StockChartDataProvider:
         """
         global _hantu_shared
 
-        if fdr is None:
-            raise ImportError("FinanceDataReader가 설치되지 않았습니다. pip install finance-datareader")
+        # if fdr is None:
+        #     raise ImportError("FinanceDataReader가 설치되지 않았습니다. pip install finance-datareader")
 
         self._hantu = hantu_stock
         if hantu_stock is None and HantuStock is not None:
@@ -101,6 +101,8 @@ class StockChartDataProvider:
 
     def _get_fdr_df(self, ticker: str) -> pd.DataFrame:
         """FDR 과거 데이터 조회 (300초 TTL 캐시 — 동일 요청 내 중복 다운로드 방지)"""
+        if fdr is None:
+            raise ImportError("FinanceDataReader가 설치되지 않았거나 import에 실패했습니다.")
         cached = self._fdr_cache.get(ticker)
         if cached and (time.time() - cached[1]) < 300:
             return cached[0]
