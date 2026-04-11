@@ -57,12 +57,16 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# 허용할 프론트엔드 주소 목록
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-# CORS_ALLOW_ALL_ORIGINS = True
+# CORS 설정: 모든 출처에서의 요청을 허용
+CORS_ALLOW_ALL_ORIGINS = True
+
+# 특정 출처
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",
+#     "http://127.0.0.1:3000",
+#     "https://stockpia-api.onrender.com",
+# ]
+
 
 ROOT_URLCONF = 'stockpia.urls'
 
