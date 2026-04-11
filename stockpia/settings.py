@@ -31,7 +31,6 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
-    'daphne',  # daphne를 최상단에 추가
     'channels', 
     'django.contrib.admin',
     'django.contrib.auth',
