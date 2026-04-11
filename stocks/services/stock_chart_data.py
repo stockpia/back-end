@@ -442,12 +442,9 @@ class StockChartDataProvider:
             period: 기간 (1d, 1m, 3m, 1y)
             show_ma: 이동평균선 표시 여부
             show_volume: 거래량 표시 여부
-
-        Returns:
-            dict: plotly JSON 및 메타 정보
         """
-        if go is None:
-            return {"error": "Plotly가 설치되지 않았습니다. pip install plotly"}
+        if go is None or make_subplots is None:
+            return {"error": "Plotly가 설치되지 않았거나 import에 실패했습니다."}
 
         try:
             # 1d는 분봉, 나머지는 일봉
@@ -583,7 +580,7 @@ class StockChartDataProvider:
             dict: plotly JSON 및 메타 정보
         """
         if go is None:
-            return {"error": "Plotly가 설치되지 않았습니다. pip install plotly"}
+            return {"error": "Plotly가 설치되지 않았거나 import에 실패했습니다."}
 
         try:
             if period == "1d":
@@ -640,8 +637,8 @@ class StockChartDataProvider:
         Returns:
             dict: plotly JSON 및 메타 정보
         """
-        if go is None:
-            return {"error": "Plotly가 설치되지 않았습니다. pip install plotly"}
+        if go is None or make_subplots is None:
+            return {"error": "Plotly가 설치되지 않았거나 import에 실패했습니다."}
 
         try:
             chart_data = self.get_chart_data(ticker, period)
@@ -743,7 +740,7 @@ class StockChartDataProvider:
             dict: plotly JSON 및 메타 정보
         """
         if go is None:
-            return {"error": "Plotly가 설치되지 않았습니다. pip install plotly"}
+            return {"error": "Plotly가 설치되지 않았거나 import에 실패했습니다."}
 
         try:
             if period == "1d":
