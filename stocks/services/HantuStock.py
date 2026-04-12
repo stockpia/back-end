@@ -21,8 +21,8 @@ except Exception:
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 
-# .env 로드 (현재 작업 디렉토리 기준)
-load_dotenv()
+# .env 로드 제거 (Render 환경에서는 불필요)
+# load_dotenv()
 
 
 class HantuStock:
@@ -42,6 +42,10 @@ class HantuStock:
         - 인자를 생략하면 .env 값을 사용함
           KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_ID, KIS_ACCOUNT_SUFFIX(optional), KIS_ENV(optional)
         """
+        # .env 파일 로드 (로컬 개발용)
+        if os.getenv("KIS_APP_KEY") is None:
+            load_dotenv()
+
         self._api_key = api_key or os.getenv("KIS_APP_KEY", "").strip()
         self._secret_key = secret_key or os.getenv("KIS_APP_SECRET", "").strip()
         self._account_id = account_id or os.getenv("KIS_ACCOUNT_ID", "").strip()
@@ -361,7 +365,7 @@ class HantuStock:
     @staticmethod
     def get_past_data(ticker: str, days: int = 100):
         if fdr is None:
-            raise ImportError("FinanceDataReader not installed")
+            raise ImportError("FinanceDataReader가 설치되지 않았거나 import에 실패했습니다.")
         df = fdr.DataReader(ticker)
         df.columns = [c.lower() for c in df.columns]
         df.index.name = "timestamp"
@@ -371,7 +375,7 @@ class HantuStock:
     @staticmethod
     def get_past_data_total(days: int = 10):
         if pystock is None:
-            raise ImportError("pykrx not installed")
+            raise ImportError("pykrx가 설치되지 않았거나 import에 실패했습니다.")
         total = None
         got = 0
         passed = 0
@@ -494,7 +498,7 @@ class HantuStock:
             ord_dvsn = "01"
             if str(quantity_scale).upper() == "CASH":
                 if fdr is None:
-                    raise ImportError("FinanceDataReader not installed")
+                    raise ImportError("FinanceDataReader가 설치되지 않았거나 import에 실패했습니다.")
                 px = self.get_past_data(ticker).iloc[-1]["close"]
         else:
             px = price
@@ -531,7 +535,7 @@ class HantuStock:
             ord_dvsn = "01"
             if str(quantity_scale).upper() == "CASH":
                 if fdr is None:
-                    raise ImportError("FinanceDataReader not installed")
+                    raise ImportError("FinanceDataReader가 설치되지 않았거나 import에 실패했습니다.")
                 px = self.get_past_data(ticker).iloc[-1]["close"]
         else:
             px = price
