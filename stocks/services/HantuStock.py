@@ -6,7 +6,6 @@ import time
 import requests
 import json
 from datetime import datetime
-from bs4 import BeautifulSoup
 
 try:
     import FinanceDataReader as fdr
@@ -21,19 +20,21 @@ except Exception:
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 
-# .env 로드 제거 (Render 환경에서는 불필요)
-# load_dotenv()
+# .env 로드 (현재 작업 디렉토리 기준)
+load_dotenv()
+
+# 실전 API (데이터 조회 전용) 토큰 캐시 — 프로세스 내 공유
+_PROD_BASE_URL = "https://openapi.koreainvestment.com:9443"
+_prod_token: str | None = None
+_prod_token_time: float = 0.0
 
 
 class HantuStock:
-    _shared_access_token = None
-
     def __init__(
         self,
         api_key: str | None = None,
         secret_key: str | None = None,
         account_id: str | None = None,
-        account_suffix: str | None = None,
         *,
         env: str | None = None,
     ):
@@ -42,14 +43,10 @@ class HantuStock:
         - 인자를 생략하면 .env 값을 사용함
           KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_ID, KIS_ACCOUNT_SUFFIX(optional), KIS_ENV(optional)
         """
-        # .env 파일 로드 (로컬 개발용)
-        if os.getenv("KIS_APP_KEY") is None:
-            load_dotenv()
-
         self._api_key = api_key or os.getenv("KIS_APP_KEY", "").strip()
         self._secret_key = secret_key or os.getenv("KIS_APP_SECRET", "").strip()
         self._account_id = account_id or os.getenv("KIS_ACCOUNT_ID", "").strip()
-        self._account_suffix = account_suffix or os.getenv("KIS_ACCOUNT_SUFFIX", "01").strip() or "01"
+        self._account_suffix = os.getenv("KIS_ACCOUNT_SUFFIX", "01").strip() or "01"
 
         _env = (env or os.getenv("KIS_ENV", "prod")).strip().lower()
         if _env not in {"prod", "vps", "paper", "demo", "sandbox", "vts"}:
@@ -74,7 +71,7 @@ class HantuStock:
             if self._env == "prod"
             else "https://openapivts.koreainvestment.com:29443"
         )
-        # self._access_token = None
+        self._access_token = self._get_access_token()
 
     # -------------------- 내부 공통 --------------------
     def _tr(self, key: str) -> str:
@@ -84,6 +81,8 @@ class HantuStock:
             "order-buy": "0012U",
             "order-sell": "0011U",
             "inquire-daily-ccld": "8001R",  # 주식일별주문체결조회 (3개월 이내)
+            "inquire-pending": "8036R",     # 미체결 주문 조회
+            "order-cancel": "0803U",        # 주문 취소
         }
         return prefix + codes[key]
 
@@ -112,18 +111,15 @@ class HantuStock:
         raise RuntimeError("Failed to get access token after retries")
 
     def _header(self, tr_id: str) -> dict:
-        if HantuStock._shared_access_token is None:
-            HantuStock._shared_access_token = self._get_access_token()
-
         return {
             "content-type": "application/json",
             "appkey": self._api_key,
             "appsecret": self._secret_key,
-            "authorization": f"Bearer {HantuStock._shared_access_token}",
+            "authorization": f"Bearer {self._access_token}",
             "tr_id": tr_id,
         }
 
-    # noinspection PyMethodMayBeStatic
+
     def _request(self, url: str, headers: dict, params: dict, *, method: str = "get"):
         backoff = 0.5
         for attempt in range(6):
@@ -293,79 +289,10 @@ class HantuStock:
             }
         }
 
-    # noinspection PyMethodMayBeStatic
-    def get_market_ranking(self, category: str, limit: int = 100) -> list | dict:
-        """
-        시장 랭킹 조회 (네이버 금융 스크래핑 활용)
-        Args:
-            category: "volume" (거래량) | "return" (등락률)
-            limit: 최대 조회 개수
-        """
-        try:
-            if category == "volume":
-                url = "https://finance.naver.com/sise/sise_quant.naver"
-            else:
-                url = "https://finance.naver.com/sise/sise_rise.naver"
-                
-            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
-            res.encoding = 'euc-kr'
-            soup = BeautifulSoup(res.text, 'html.parser')
-            
-            table = soup.find('table', {'class': 'type_2'})
-            if not table:
-                return {"error": "네이버 금융 테이블을 찾을 수 없습니다."}
-                
-            rows = table.find_all('tr')
-            
-            result = []
-            for row in rows:
-                if len(result) >= limit:
-                    break
-                cols = row.find_all('td')
-                if len(cols) >= 10:
-                    a_tag = cols[1].find('a')
-                    if not a_tag:
-                        continue
-                    
-                    href = a_tag.get('href', '')
-                    if 'code=' not in href:
-                        continue
-                        
-                    symbol = href.split('code=')[1]
-                    name = a_tag.text.strip()
-                    
-                    price_str = cols[2].text.strip().replace(',', '')
-                    current_price = int(price_str) if price_str.isdigit() else 0
-                    
-                    rate_str = cols[4].text.strip().replace('%', '').replace('+', '')
-                    try:
-                        change_rate = float(rate_str)
-                    except ValueError:
-                        change_rate = 0.0
-                        
-                    vol_str = cols[5].text.strip().replace(',', '')
-                    volume = int(vol_str) if vol_str.isdigit() else 0
-                    
-                    result.append({
-                        "symbol": symbol,
-                        "company_name": name,
-                        "current_price": current_price,
-                        "change_rate": change_rate,
-                        "volume": volume
-                    })
-                    
-            if not result:
-                return {"error": "네이버 금융 파싱 결과가 비어있습니다."}
-                
-            return result
-            
-        except Exception as e:
-            return {"error": f"네이버 금융 스크래핑 중 에러: {str(e)}"}
-
     @staticmethod
     def get_past_data(ticker: str, days: int = 100):
         if fdr is None:
-            raise ImportError("FinanceDataReader가 설치되지 않았거나 import에 실패했습니다.")
+            raise ImportError("FinanceDataReader not installed")
         df = fdr.DataReader(ticker)
         df.columns = [c.lower() for c in df.columns]
         df.index.name = "timestamp"
@@ -375,7 +302,7 @@ class HantuStock:
     @staticmethod
     def get_past_data_total(days: int = 10):
         if pystock is None:
-            raise ImportError("pykrx가 설치되지 않았거나 import에 실패했습니다.")
+            raise ImportError("pykrx not installed")
         total = None
         got = 0
         passed = 0
@@ -498,7 +425,7 @@ class HantuStock:
             ord_dvsn = "01"
             if str(quantity_scale).upper() == "CASH":
                 if fdr is None:
-                    raise ImportError("FinanceDataReader가 설치되지 않았거나 import에 실패했습니다.")
+                    raise ImportError("FinanceDataReader not installed")
                 px = self.get_past_data(ticker).iloc[-1]["close"]
         else:
             px = price
@@ -506,7 +433,6 @@ class HantuStock:
             ord_dvsn = "00"
         scale = str(quantity_scale).upper()
         if scale == "CASH":
-            # noinspection PyUnboundLocalVariable
             qty = int(float(quantity) / float(px))
         elif scale == "STOCK":
             qty = int(quantity)
@@ -525,6 +451,8 @@ class HantuStock:
         url = self._base_url + "/uapi/domestic-stock/v1/trading/order-cash"
         _, data = self._request(url, headers, params, method="post")
         if data.get("rt_cd") == "0":
+            if self._env == "vps":
+                self._append_transaction_log(ticker, "buy", price, qty)
             return data.get("output", {}).get("ODNO"), qty
         print(data.get("msg1"))
         return None, 0
@@ -535,7 +463,7 @@ class HantuStock:
             ord_dvsn = "01"
             if str(quantity_scale).upper() == "CASH":
                 if fdr is None:
-                    raise ImportError("FinanceDataReader가 설치되지 않았거나 import에 실패했습니다.")
+                    raise ImportError("FinanceDataReader not installed")
                 px = self.get_past_data(ticker).iloc[-1]["close"]
         else:
             px = price
@@ -543,7 +471,6 @@ class HantuStock:
             ord_dvsn = "00"
         scale = str(quantity_scale).upper()
         if scale == "CASH":
-            # noinspection PyUnboundLocalVariable
             qty = int(float(quantity) / float(px))
         elif scale == "STOCK":
             qty = int(quantity)
@@ -566,9 +493,279 @@ class HantuStock:
             if od is None:
                 print("[ERROR] ask: ", data.get("msg1"))
                 return None, 0
+            if self._env == "vps":
+                self._append_transaction_log(ticker, "sell", price, qty)
             return od, qty
         print(data.get("msg1"))
         return None, 0
+
+    # -------------------- 호가 --------------------
+    def get_asking_price(self, ticker: str) -> dict:
+        """
+        실시간 호가 리스트 + 체결 강도 (Web_06)
+
+        Args:
+            ticker: 종목코드 (6자리)
+
+        Returns:
+            {
+                "symbol": "005930",
+                "asks": [{"price": int, "quantity": int}, ...],  # 매도 호가 10단계
+                "bids": [{"price": int, "quantity": int}, ...],  # 매수 호가 10단계
+                "trade_strength": float,  # 체결 강도 (%)
+            }
+        """
+        headers = self._header("FHKST01010200")
+        params = {
+            "fid_cond_mrkt_div_code": "J",
+            "fid_input_iscd": ticker,
+        }
+        url = self._base_url + "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccnt"
+        _, res = self._request(url, headers, params)
+
+        if res.get("rt_cd") != "0":
+            return {"error": res.get("msg1", "호가 조회 실패")}
+
+        output1 = res.get("output1", {})
+
+        asks = []
+        bids = []
+        for i in range(1, 11):
+            ask_price = int(output1.get(f"askp{i}", 0) or 0)
+            ask_qty = int(output1.get(f"askp_rsqn{i}", 0) or 0)
+            bid_price = int(output1.get(f"bidp{i}", 0) or 0)
+            bid_qty = int(output1.get(f"bidp_rsqn{i}", 0) or 0)
+            if ask_price > 0:
+                asks.append({"price": ask_price, "quantity": ask_qty})
+            if bid_price > 0:
+                bids.append({"price": bid_price, "quantity": bid_qty})
+
+        # 체결 강도: 총 매수 체결량 / (총 매수 + 총 매도) * 100
+        sell_vol = int(output1.get("seln_cnqn_smtn", 0) or 0)
+        buy_vol = int(output1.get("shnu_cnqn_smtn", 0) or 0)
+        total = sell_vol + buy_vol
+        trade_strength = round(buy_vol / total * 100, 1) if total > 0 else 50.0
+
+        return {
+            "symbol": ticker,
+            "asks": asks,
+            "bids": bids,
+            "trade_strength": trade_strength,
+        }
+
+    # -------------------- 미체결 주문 --------------------
+    def get_pending_orders(self, ticker: str | None = None) -> list:
+        """
+        미체결 주문 목록 조회 (Web_06)
+
+        Args:
+            ticker: 특정 종목만 필터링 (None이면 전체)
+
+        Returns:
+            list[dict]:
+                - order_id:          주문번호
+                - symbol:            종목코드
+                - company_name:      종목명
+                - side:              "buy" | "sell"
+                - price:             주문 단가
+                - pending_quantity:  미체결 잔여 수량
+                - ordered_at:        주문 일시 (ISO 형식)
+        """
+        headers = self._header(self._tr("inquire-pending"))
+        out = []
+        cont = True
+        fk100 = ""
+        nk100 = ""
+
+        while cont:
+            params = {
+                "CANO": self._account_id,
+                "ACNT_PRDT_CD": self._account_suffix,
+                "CTX_AREA_FK100": fk100,
+                "CTX_AREA_NK100": nk100,
+                "INQR_DVSN_3": "00",  # 00: 전체
+                "INQR_DVSN_1": "",
+            }
+            url = self._base_url + "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
+            hd, res = self._request(url, headers, params)
+
+            if res.get("rt_cd") != "0":
+                print(f"[ERROR] get_pending_orders: {res.get('msg1')}")
+                break
+
+            cont = hd.get("tr_cont") in {"F", "M"}
+            headers["tr_cont"] = "N"
+            fk100 = res.get("ctx_area_fk100", "")
+            nk100 = res.get("ctx_area_nk100", "")
+            out += res.get("output1", [])
+
+        result = []
+        for r in out:
+            rmn_qty = int(r.get("rmn_qty", 0) or 0)
+            if rmn_qty == 0:
+                continue
+
+            symbol = r.get("pdno", "")
+            if ticker and symbol != ticker:
+                continue
+
+            # 주문 일시 파싱
+            ord_dt = r.get("ord_dt", "")
+            ord_tmd = r.get("ord_tmd", "")
+            ordered_at = ""
+            if ord_dt and ord_tmd:
+                try:
+                    ordered_at = (
+                        f"{ord_dt[:4]}-{ord_dt[4:6]}-{ord_dt[6:8]}"
+                        f"T{ord_tmd[:2]}:{ord_tmd[2:4]}:{ord_tmd[4:6]}"
+                    )
+                except Exception:
+                    ordered_at = ord_dt
+
+            result.append({
+                "order_id": r.get("odno", ""),
+                "symbol": symbol,
+                "company_name": r.get("prdt_name", ""),
+                "side": "buy" if r.get("sll_buy_dvsn_cd") == "02" else "sell",
+                "price": int(r.get("ord_unpr", 0) or 0),
+                "pending_quantity": rmn_qty,
+                "ordered_at": ordered_at,
+            })
+
+        return result
+
+    def cancel_order(self, order_id: str, ticker: str, quantity: int) -> bool:
+        """
+        미체결 주문 취소 (Web_06)
+
+        Args:
+            order_id:  취소할 주문번호
+            ticker:    종목코드
+            quantity:  취소 수량 (미체결 잔여 수량 전달 권장)
+
+        Returns:
+            True (취소 성공) | False (실패)
+        """
+        headers = self._header(self._tr("order-cancel"))
+        params = {
+            "CANO": self._account_id,
+            "ACNT_PRDT_CD": self._account_suffix,
+            "KRX_FWDG_ORD_ORGNO": "",
+            "ORGN_ODNO": order_id,
+            "PDNO": ticker,
+            "ORD_DVSN": "00",
+            "RVSE_CNCL_DVSN_CD": "02",  # 02: 취소
+            "ORD_QTY": str(quantity),
+            "ORD_UNPR": "0",
+            "QTY_ALL_ORD_YN": "Y",
+        }
+        url = self._base_url + "/uapi/domestic-stock/v1/trading/order-rvsecncl"
+        _, data = self._request(url, headers, params, method="post")
+        if data.get("rt_cd") != "0":
+            print(f"[ERROR] cancel_order: {data.get('msg1')}")
+            return False
+        return True
+
+    # -------------------- VPS 로컬 거래 로그 --------------------
+    def _transaction_log_path(self) -> str:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "transaction_log.json")
+
+    def _append_transaction_log(self, ticker: str, side: str, price, qty: int) -> None:
+        """VPS 모드 주문 체결 시 로컬 로그 파일에 기록 (inquire-daily-ccld 대체)"""
+        # 연속 주문 후 초당 거래 초과 방지
+        time.sleep(0.5)
+        price_info = self.get_stock_price(ticker)
+        # name이 빈 문자열이거나 ticker와 같으면 1회 재시도
+        prdt_name = price_info.get("name", "")
+        if not prdt_name or prdt_name == ticker:
+            time.sleep(1.0)
+            price_info = self.get_stock_price(ticker)
+            prdt_name = price_info.get("name", ticker)
+        actual_price = (
+            float(price_info.get("current_price", 0))
+            if price in {"market", "", 0}
+            else float(price)
+        )
+        record = {
+            "ord_dt": datetime.now().strftime("%Y%m%d"),
+            "pdno": ticker,
+            "prdt_name": prdt_name,
+            "sll_buy_dvsn_cd": "02" if side == "buy" else "01",
+            "sll_buy_dvsn_cd_name": "매수" if side == "buy" else "매도",
+            "ord_qty": qty,
+            "tot_ccld_qty": qty,
+            "avg_prvs": actual_price,
+            "tot_ccld_amt": actual_price * qty,
+        }
+        log_path = self._transaction_log_path()
+        try:
+            logs = json.load(open(log_path, "r", encoding="utf-8")) if os.path.exists(log_path) else []
+            logs.append(record)
+            with open(log_path, "w", encoding="utf-8") as f:
+                json.dump(logs, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[WARN] _append_transaction_log: {e}")
+
+    def _read_transaction_log(self, start_date: str, end_date: str, sll_buy_dvsn: str) -> list:
+        """VPS 모드 로컬 거래 로그 날짜·구분 필터링 조회"""
+        log_path = self._transaction_log_path()
+        if not os.path.exists(log_path):
+            return []
+        try:
+            logs = json.load(open(log_path, "r", encoding="utf-8"))
+        except Exception:
+            return []
+        result = []
+        for r in logs:
+            ord_dt = r.get("ord_dt", "")
+            if start_date and ord_dt < start_date:
+                continue
+            if end_date and ord_dt > end_date:
+                continue
+            if sll_buy_dvsn != "00" and r.get("sll_buy_dvsn_cd") != sll_buy_dvsn:
+                continue
+            result.append(r)
+        return result
+
+    def _calc_avg_from_log(self, symbol: str) -> float:
+        """
+        로컬 거래 로그 기반 평균매수가 계산 (VPS avg_price=0 fallback)
+
+        한국 증권 가중평균 방식:
+          - 매수 시마다 누적 평단 갱신
+          - 매도는 평단에 영향 없음 (수량만 감소)
+
+        Returns:
+            계산된 평단가 (float). 로그 없거나 매수 기록 없으면 0.0
+        """
+        log_path = self._transaction_log_path()
+        if not os.path.exists(log_path):
+            return 0.0
+        try:
+            logs = json.load(open(log_path, "r", encoding="utf-8"))
+        except Exception:
+            return 0.0
+
+        # 한국 증권 가중평균법:
+        # - 매수: (기존평단 * 기존수량 + 매수단가 * 매수수량) / 신규총수량
+        # - 매도: 평단 불변, 수량만 감소
+        running_qty = 0
+        running_avg = 0.0
+        for r in logs:
+            if r.get("pdno") != symbol:
+                continue
+            qty = int(r.get("tot_ccld_qty", 0))
+            price = float(r.get("avg_prvs", 0))
+            if r.get("sll_buy_dvsn_cd") == "02":  # 매수
+                new_qty = running_qty + qty
+                running_avg = (running_avg * running_qty + price * qty) / new_qty
+                running_qty = new_qty
+            else:  # 매도 — 평단 불변, 수량만 감소
+                running_qty = max(0, running_qty - qty)
+
+        if running_qty <= 0 or running_avg == 0:
+            return 0.0
+        return round(running_avg, 2)
 
     # -------------------- 거래내역 조회 --------------------
     def get_transaction_history(
@@ -606,12 +803,17 @@ class HantuStock:
 
         if start_date is None:
             period_map = {
+                "1w": relativedelta(weeks=1),
                 "1m": relativedelta(months=1),
                 "3m": relativedelta(months=3),
                 "1y": relativedelta(years=1),
             }
             delta = period_map.get(period, relativedelta(months=1))
             start_date = (today - delta).strftime("%Y%m%d")
+
+        # VPS(모의투자) 모드: KIS API output1 미지원 → 로컬 로그 사용
+        if self._env == "vps":
+            return self._read_transaction_log(start_date, end_date, sll_buy_dvsn)
 
         headers = self._header(self._tr("inquire-daily-ccld"))
         out = []
@@ -671,12 +873,123 @@ class HantuStock:
 
         return result
 
+    def _get_prod_token(self, prod_key: str, prod_secret: str) -> str:
+        """실전 API 토큰 조회 (24시간 캐시, 프로세스 내 공유)"""
+        global _prod_token, _prod_token_time
+        if _prod_token and (time.time() - _prod_token_time) < 86400:
+            return _prod_token
+        url = _PROD_BASE_URL + "/oauth2/token"
+        body = {
+            "grant_type": "client_credentials",
+            "appkey": prod_key,
+            "appsecret": prod_secret,
+        }
+        res = requests.post(
+            url,
+            headers={"content-type": "application/json"},
+            data=json.dumps(body),
+            timeout=30,
+        )
+        token = res.json().get("access_token", "")
+        if token:
+            _prod_token = token
+            _prod_token_time = time.time()
+        return token
+
+    def get_market_ranking(
+        self,
+        category: str = "volume",
+        market: str = "J",
+        limit: int = 5,
+    ) -> list:
+        """
+        국내주식 순위 조회 (거래량 / 등락률)
+
+        모의(vps) 환경에서 KIS_APP_KEY_PROD / KIS_APP_SECRET_PROD 가 .env에
+        설정되어 있으면 실전 API로 조회합니다 (랭킹 API는 실전만 지원).
+        설정되지 않은 경우 현재 환경(vps)의 인증정보로 시도합니다.
+
+        Args:
+            category: "volume" (거래량 순위) | "return" (등락률 순위)
+            market:   "J" (전체) | "0001" (코스피) | "1001" (코스닥)
+            limit:    상위 N개 (기본 5)
+
+        Returns:
+            list[dict]:
+                - symbol:        종목코드
+                - company_name:  종목명
+                - current_price: 현재가
+                - change_rate:   전일대비율 (%)
+                - volume:        누적거래량
+        """
+        if category == "volume":
+            tr_id = "FHPST01710000"
+            path = "/uapi/domestic-stock/v1/ranking/volume"
+            scr_div = "20171"
+            sort_cls = "0"
+        else:
+            tr_id = "FHPST01700000"
+            path = "/uapi/domestic-stock/v1/ranking/fluctuation"
+            scr_div = "20170"
+            sort_cls = "0"
+
+        # 모의 환경이고 실전 키가 별도로 있으면 실전 엔드포인트 사용
+        prod_key = os.getenv("KIS_APP_KEY_PROD", "").strip()
+        prod_secret = os.getenv("KIS_APP_SECRET_PROD", "").strip()
+
+        if self._env == "vps" and prod_key and prod_secret:
+            base_url = _PROD_BASE_URL
+            token = self._get_prod_token(prod_key, prod_secret)
+            headers = {
+                "content-type": "application/json",
+                "appkey": prod_key,
+                "appsecret": prod_secret,
+                "authorization": f"Bearer {token}",
+                "tr_id": tr_id,
+            }
+        else:
+            base_url = self._base_url
+            headers = self._header(tr_id)
+
+        params = {
+            "fid_cond_mrkt_div_code":  market,
+            "fid_cond_scr_div_code":   scr_div,
+            "fid_input_iscd":          "0000",
+            "fid_rank_sort_cls_code":  sort_cls,
+            "fid_input_cnt_1":         "0",
+            "fid_prc_cls_code":        "0",
+            "fid_input_price_1":       "",
+            "fid_input_price_2":       "",
+            "fid_vol_cnt":             "",
+            "fid_trgt_cls_code":       "0",
+            "fid_trgt_exls_cls_code":  "0",
+            "fid_div_cls_code":        "0",
+            "fid_rsfl_rate1":          "",
+            "fid_rsfl_rate2":          "",
+        }
+
+        _, res = self._request(base_url + path, headers, params)
+        if res.get("rt_cd") != "0":
+            print(f"[WARN] get_market_ranking: {res.get('msg1')}")
+            return []
+
+        result = []
+        for item in res.get("output", [])[:limit]:
+            result.append({
+                "symbol":        item.get("stck_shrn_iscd", ""),
+                "company_name":  item.get("hts_kor_isnm", ""),
+                "current_price": int(item.get("stck_prpr", 0)),
+                "change_rate":   float(item.get("prdy_ctrt", 0)),
+                "volume":        int(item.get("acml_vol", 0)),
+            })
+        return result
+
     def get_transaction_summary(self, period: str = "1m") -> dict:
         """
         거래내역 요약 (기획 2-4, 2-6 지원)
 
         Args:
-            period: 기간 ("1m": 1개월, "3m": 3개월, "1y": 1년)
+            period: 기간 ("1w": 1주일, "1m": 1개월, "3m": 3개월, "1y": 1년)
 
         Returns:
             dict: 거래 요약 정보
