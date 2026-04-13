@@ -27,7 +27,7 @@ packaging==23.2
 pandas==2.1.4
 Pillow==10.2.0
 pycparser==2.22
-pykrx==1.0.48
+# pykrx==1.0.48
 pyparsing==3.1.2
 python-dateutil==2.9.0.post0
 pytz==2024.1
