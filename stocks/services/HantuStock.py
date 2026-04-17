@@ -6,6 +6,7 @@ import time
 import requests
 import json
 from datetime import datetime
+import sys
 
 try:
     import FinanceDataReader as fdr
@@ -92,7 +93,8 @@ class HantuStock:
         return prefix + codes[key]
 
     def _get_access_token(self) -> str:
-        token_path = "/oauth2/token" if self._env == "prod" else "/oauth2/tokenP"
+        # 실전/모의 모두 토큰 발급 경로는 /oauth2/tokenP 입니다.
+        token_path = "/oauth2/tokenP"
         url = self._base_url + token_path
         headers = {"content-type": "application/json"}
         body = {
@@ -106,9 +108,9 @@ class HantuStock:
             data = res.json()
             if "access_token" in data:
                 return data["access_token"]
-            print(f"[WARN] token error: {data}")
+            print(f"[WARN] token error: {data}", file=sys.stderr)
         except Exception as e:
-            print(f"[ERROR] get_access_token (exception): {e}")
+            print(f"[ERROR] get_access_token (exception): {e}", file=sys.stderr)
         raise RuntimeError("Failed to get access token")
 
     def _header(self, tr_id: str) -> dict:
@@ -131,7 +133,7 @@ class HantuStock:
 
             # 1. 상태 코드가 200이 아닌 경우 (예: 404 Not Found, 403 Forbidden 등)
             if resp.status_code != 200:
-                print(f"[API-ERROR] HTTP {resp.status_code} - {resp.url}")
+                print(f"[API-ERROR] HTTP {resp.status_code} - {resp.url}", file=sys.stderr)
                 try:
                     data = resp.json()
                 except Exception:
@@ -143,13 +145,13 @@ class HantuStock:
             try:
                 data = resp.json()
             except Exception as e:
-                print(f"[API-ERROR] JSON 파싱 실패: {resp.text[:100]}...")
+                print(f"[API-ERROR] JSON 파싱 실패: {resp.text[:100]}...", file=sys.stderr)
                 return r_headers, {"rt_cd": "1", "msg1": "API 서버에서 잘못된 응답을 반환했습니다."}
 
             if data.get("rt_cd") != "0":
                 # EGW00201: 초당 거래건수 초과 시 딱 1번만 깔끔하게 재시도
                 if data.get("msg_cd") in {"EGW00201", "EGW00123"}:
-                    print(f"[API-WARN] 초당 거래건수 초과. 0.5초 대기 후 1회 재시도합니다.")
+                    print(f"[API-WARN] 초당 거래건수 초과. 0.5초 대기 후 1회 재시도합니다.", file=sys.stderr)
                     time.sleep(0.5)
                     if method == "get":
                         resp = requests.get(url, headers=headers, params=params, timeout=30)
@@ -164,11 +166,11 @@ class HantuStock:
 
                 # 재시도 후에도 에러면 최종 에러 출력
                 if data.get("rt_cd") != "0":
-                    print(f"[API-ERROR] {data.get('msg1')} (msg_cd: {data.get('msg_cd')})")
+                    print(f"[API-ERROR] {data.get('msg1')} (msg_cd: {data.get('msg_cd')})", file=sys.stderr)
 
             return r_headers, data
         except Exception as e:
-            print(f"[REQUEST-ERROR] {e}")
+            print(f"[REQUEST-ERROR] {e}", file=sys.stderr)
             return {}, {"rt_cd": "1", "msg1": f"request failed: {e}"}
 
     # -------------------- 시세 --------------------
@@ -184,8 +186,8 @@ class HantuStock:
         """
         headers = self._header("FHKST01010100")
         params = {
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker,
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": ticker,
         }
         url = self._base_url + "/uapi/domestic-stock/v1/quotations/inquire-price"
         _, res = self._request(url, headers, params)
@@ -238,11 +240,11 @@ class HantuStock:
             end_time = now.strftime("%H%M%S")
 
         params = {
-            "fid_etc_cls_code": "",
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker,
-            "fid_input_hour_1": end_time,
-            "fid_pw_data_incu_yn": "N",
+            "FID_ETC_CLS_CODE": "",
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": ticker,
+            "FID_INPUT_HOUR_1": end_time,
+            "FID_PW_DATA_INCU_YN": "N",
         }
         url = self._base_url + "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
 
@@ -265,7 +267,7 @@ class HantuStock:
             last_time = output2[-1].get("stck_cntg_hour", "")
             if not last_time or last_time <= "090000":
                 break
-            params["fid_input_hour_1"] = last_time
+            params["FID_INPUT_HOUR_1"] = last_time
 
         if not all_data:
             return {"error": "분봉 데이터가 없습니다"}
@@ -541,10 +543,11 @@ class HantuStock:
         """
         headers = self._header("FHKST01010200")
         params = {
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker,
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": ticker,
         }
-        url = self._base_url + "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccnt"
+        # KIS OpenAPI 호가조회(inquire-asking-price-exp-ccn) 경로 오타 수정 (끝에 t 제거)
+        url = self._base_url + "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn"
         _, res = self._request(url, headers, params)
 
         if res.get("rt_cd") != "0":
@@ -902,7 +905,7 @@ class HantuStock:
         global _prod_token, _prod_token_time
         if _prod_token and (time.time() - _prod_token_time) < 86400:
             return _prod_token
-        url = _PROD_BASE_URL + "/oauth2/token"
+        url = _PROD_BASE_URL + "/oauth2/tokenP"  # 여기도 수정 (만약을 위해)
         body = {
             "grant_type": "client_credentials",
             "appkey": prod_key,

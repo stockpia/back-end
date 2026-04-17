@@ -679,10 +679,9 @@ class StockReportView(APIView):
 
             cache_key = f"web05_report_{symbol}_{user_id}"
 
-            # 테스트를 위해 임시로 캐시를 비활성화해 둔 상태
-            # cached_data = cache.get(cache_key)
-            # if cached_data:
-            #    return Response(cached_data)
+            cached_data = cache.get(cache_key)
+            if cached_data:
+               return Response(cached_data)
 
             result = web_report.get_report(symbol, company_name, user_id)
 
