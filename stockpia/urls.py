@@ -25,6 +25,7 @@ from drf_yasg import openapi
 
 api_patterns = [
     path('api/web/', include('stocks.urls')),
+    path('api/v1/', include('stocks.urls')), # 매매 기능 -> v1 사용
 ]
 
 schema_view = get_schema_view(

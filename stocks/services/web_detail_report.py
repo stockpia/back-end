@@ -15,6 +15,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 
+from .HantuStock import HantuStock
+from .glossary_api import GlossaryAPI
+
 load_dotenv()
 
 
@@ -37,17 +40,13 @@ class WebDetailReport:
 
     def __init__(self):
         """Initialize"""
-        try:
-            from .HantuStock import HantuStock
-        except ImportError:
-            from HantuStock import HantuStock
         self.hantu = HantuStock()
 
         # Gemini (LLM) - narrative + AI 비서
         self.gemini_key = os.environ.get("GEMINI_API_KEY")
         if self.gemini_key:
             try:
-                import google.genai as genai
+                import google.generativeai as genai
                 genai.configure(api_key=self.gemini_key)
                 self.genai = genai
             except ImportError:
@@ -56,10 +55,6 @@ class WebDetailReport:
             self.genai = None
 
         # 용어 사전 (AI 비서용)
-        try:
-            from .glossary_api import GlossaryAPI
-        except ImportError:
-            from glossary_api import GlossaryAPI
         self.glossary = GlossaryAPI()
 
     # ========================================

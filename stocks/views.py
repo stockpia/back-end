@@ -11,6 +11,14 @@ from .services.stock_news_data import StockNewsDataProvider
 from .services.stock_averaging_data import StockAveragingDataProvider
 from .services.web_stock_report import WebStockReport
 from .services.web_detail_report import WebDetailReport
+from .services.web_order import WebOrder
+from .schemas import (
+    OrderPayload, OrderResponse, PendingOrdersResponse,
+    AccountBalanceResponse, HoldingResponse, CancelOrderPayload,
+    OrderBookResponse
+)
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
 
 
 def resolve_symbol(symbol_or_name: str) -> str:
@@ -659,13 +667,14 @@ class StockReportView(APIView):
             if not symbol.isdigit():
                 return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
+            web_report = WebStockReport()
+            
             # 1. 프론트엔드에서 넘어온 값을 우선적으로 받는다.
             company_name = request.query_params.get('company_name')
 
             # 2. 값이 아예 없거나, 실수로 종목 코드가 이름 자리에 들어왔을 때만 API로 검색을 시도한다.
             if not company_name or company_name == symbol or company_name.isdigit():
-                chart_provider = StockChartDataProvider()
-                info = chart_provider.get_stock_info(symbol)
+                info = web_report.chart_provider.get_stock_info(symbol)
                 company_name = info.get('company_name', original_symbol if not original_symbol.isdigit() else symbol)
 
             cache_key = f"web05_report_{symbol}_{user_id}"
@@ -675,7 +684,6 @@ class StockReportView(APIView):
             # if cached_data:
             #    return Response(cached_data)
 
-            web_report = WebStockReport()
             result = web_report.get_report(symbol, company_name, user_id)
 
             if "error" in result:
@@ -874,3 +882,173 @@ class StockFavoriteListView(APIView):
         web_report = WebStockReport()
         result = web_report.get_favorites(user_id)
         return Response(result)
+
+
+# Web_06: 실시간 주식 매매 관련 API
+
+class OrderBookView(APIView):
+    """
+    GET /api/v1/stocks/{ticker}/orderbook
+    특정 종목의 호가(매도/매수 10호가 등), 현재가, 체결강도 조회
+    """
+    @swagger_auto_schema(
+        tags=['Trading'],
+        operation_summary="종목 호가 조회",
+        responses={200: openapi.Response('호가 정보', OrderBookResponse)}
+    )
+    def get(self, request, ticker):
+        try:
+            service = WebOrder()
+            order_book = service.get_order_book(ticker)
+            if "error" in order_book:
+                return Response(order_book, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Pydantic 스키마를 사용하여 응답 데이터 검증 및 직렬화
+            response_data = OrderBookResponse(**order_book).dict()
+            return Response(response_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AccountBalanceView(APIView):
+    """
+    GET /api/v1/account/balance
+    현재 사용자의 예수금(구매 가능 금액) 및 계좌 상태 조회
+    """
+    @swagger_auto_schema(
+        tags=['Trading'],
+        operation_summary="계좌 잔고(예수금) 조회",
+        responses={200: openapi.Response('예수금 정보', AccountBalanceResponse)}
+    )
+    def get(self, request):
+        try:
+            service = WebOrder()
+            # get_account_info는 여러 정보를 반환하므로 필요한 예수금만 추출
+            account_info = service.get_account_info(symbol="005930") # 아무 종목이나 넣어도 예수금은 동일
+            if "error" in account_info:
+                 return Response(account_info, status=status.HTTP_400_BAD_REQUEST)
+
+            response_data = AccountBalanceResponse(available_cash=account_info.get("available_cash", 0)).dict()
+            return Response(response_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AccountHoldingsView(APIView):
+    """
+    GET /api/v1/account/holdings/{ticker}
+    특정 종목의 보유 수량, 평단가 조회
+    """
+    @swagger_auto_schema(
+        tags=['Trading'],
+        operation_summary="특정 종목 보유 정보 조회",
+        responses={200: openapi.Response('보유 종목 정보', HoldingResponse)}
+    )
+    def get(self, request, ticker):
+        try:
+            service = WebOrder()
+            holding_info = service.get_account_info(ticker)
+            if "error" in holding_info:
+                 return Response(holding_info, status=status.HTTP_400_BAD_REQUEST)
+
+            response_data = HoldingResponse(
+                ticker=ticker,
+                holding_quantity=holding_info.get("holding_quantity", 0),
+                average_price=holding_info.get("average_price", 0.0),
+                current_price=holding_info.get("current_price", 0)
+            ).dict()
+            return Response(response_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class OrderView(APIView):
+    """
+    POST /api/v1/orders
+    매수/매도 주문 접수
+    """
+    @swagger_auto_schema(
+        tags=['Trading'],
+        operation_summary="매수/매도 주문",
+        request_body=OrderPayload,
+        responses={200: openapi.Response('주문 결과', OrderResponse)}
+    )
+    def post(self, request):
+        payload = OrderPayload(**request.data)
+        
+        # 시장가 주문 시, 가격은 0으로 설정하거나 API 내부에서 처리합니다.
+        # HantuStock의 bid/ask는 price 파라미터가 "market"일 경우 시장가로 동작합니다.
+        # WebOrder의 place_order는 order_type이 "market"이면 알아서 처리해줍니다.
+        # 주석: 시장가(market) 주문 시 'price' 필드는 API에 의해 무시되지만,
+        # 클라이언트에서는 0 또는 현재가를 채워서 보낼 수 있습니다.
+        # 백엔드에서는 이 값을 사용하지 않고 'order_type'에 따라 분기합니다.
+        
+        try:
+            service = WebOrder()
+            result = service.place_order(
+                symbol=payload.ticker,
+                side=payload.side,
+                order_type=payload.order_type,
+                price=payload.price,
+                quantity=payload.quantity
+            )
+            
+            response_data = OrderResponse(**result).dict()
+            if not response_data['success']:
+                return Response(response_data, status=status.HTTP_400_BAD_REQUEST)
+                
+            return Response(response_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PendingOrdersView(APIView):
+    """
+    GET /api/v1/orders/pending
+    체결 대기 중인 미체결 주문 리스트 조회
+    """
+    @swagger_auto_schema(
+        tags=['Trading'],
+        operation_summary="미체결 주문 목록 조회",
+        responses={200: openapi.Response('미체결 주문 목록', PendingOrdersResponse)}
+    )
+    def get(self, request):
+        try:
+            service = WebOrder()
+            pending_orders = service.get_pending_orders()
+            
+            response_data = PendingOrdersResponse(**pending_orders).dict()
+            return Response(response_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class CancelOrderView(APIView):
+    """
+    DELETE /api/v1/orders/{order_id}
+    특정 미체결 주문 취소
+    """
+    @swagger_auto_schema(
+        tags=['Trading'],
+        operation_summary="미체결 주문 취소",
+        request_body=CancelOrderPayload,
+        responses={200: openapi.Response('주문 취소 결과', OrderResponse)}
+    )
+    def delete(self, request, order_id):
+        payload = CancelOrderPayload(**request.data)
+        
+        try:
+            service = WebOrder()
+            result = service.cancel_order(
+                order_id=order_id,
+                symbol=payload.ticker,
+                quantity=payload.quantity
+            )
+            
+            response_data = OrderResponse(**result).dict()
+            if not response_data['success']:
+                return Response(response_data, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response(response_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

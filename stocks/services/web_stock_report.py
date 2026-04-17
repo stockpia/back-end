@@ -15,8 +15,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
+from .stock_chart_data import StockChartDataProvider
 
+load_dotenv()
 
 class WebStockReport:
     """
@@ -40,7 +41,6 @@ class WebStockReport:
 
     def __init__(self):
         """Initialize"""
-        from .stock_chart_data import StockChartDataProvider
         self.chart_provider = StockChartDataProvider()
 
         # Gemini (LLM)

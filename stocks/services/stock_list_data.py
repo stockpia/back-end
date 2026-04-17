@@ -12,7 +12,7 @@ try:
 except ImportError:
     # 직접 스크립트로 실행할 때를 위한 절대 경로 임포트
     try:
-        from HantuStock import HantuStock
+        from .HantuStock import HantuStock
     except ImportError:
         HantuStock = None
 

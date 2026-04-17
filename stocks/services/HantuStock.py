@@ -43,16 +43,21 @@ class HantuStock:
         - 인자를 생략하면 .env 값을 사용함
           KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_ID, KIS_ACCOUNT_SUFFIX(optional), KIS_ENV(optional)
         """
-        self._api_key = api_key or os.getenv("KIS_APP_KEY", "").strip()
-        self._secret_key = secret_key or os.getenv("KIS_APP_SECRET", "").strip()
-        self._account_id = account_id or os.getenv("KIS_ACCOUNT_ID", "").strip()
-        self._account_suffix = os.getenv("KIS_ACCOUNT_SUFFIX", "01").strip() or "01"
-
         _env = (env or os.getenv("KIS_ENV", "prod")).strip().lower()
         if _env not in {"prod", "vps", "paper", "demo", "sandbox", "vts"}:
             raise ValueError("env must be one of {'prod','vps'}; alias {'paper','demo','sandbox'} allowed")
         # alias 처리
         self._env = "vps" if _env in {"vps", "paper", "demo", "sandbox", "vts"} else "prod"
+
+        if self._env == "prod":
+            self._api_key = api_key or os.getenv("KIS_APP_KEY_PROD", "").strip() or os.getenv("KIS_APP_KEY", "").strip()
+            self._secret_key = secret_key or os.getenv("KIS_APP_SECRET_PROD", "").strip() or os.getenv("KIS_APP_SECRET", "").strip()
+        else:
+            self._api_key = api_key or os.getenv("KIS_APP_KEY", "").strip()
+            self._secret_key = secret_key or os.getenv("KIS_APP_SECRET", "").strip()
+
+        self._account_id = account_id or os.getenv("KIS_ACCOUNT_ID", "").strip()
+        self._account_suffix = os.getenv("KIS_ACCOUNT_SUFFIX", "01").strip() or "01"
 
         # 필수값 검증
         missing = [k for k, v in {
@@ -95,20 +100,16 @@ class HantuStock:
             "appkey": self._api_key,
             "appsecret": self._secret_key,
         }
-        backoff = 0.5
-        for attempt in range(6):
-            try:
-                res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30)
-                data = res.json()
-                if "access_token" in data:
-                    return data["access_token"]
-                # error message
-                print(f"[WARN] token error: {data}")
-            except Exception as e:
-                print(f"[ERROR] get_access_token: {e}")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 5.0)
-        raise RuntimeError("Failed to get access token after retries")
+        
+        try:
+            res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
+            data = res.json()
+            if "access_token" in data:
+                return data["access_token"]
+            print(f"[WARN] token error: {data}")
+        except Exception as e:
+            print(f"[ERROR] get_access_token (exception): {e}")
+        raise RuntimeError("Failed to get access token")
 
     def _header(self, tr_id: str) -> dict:
         return {
@@ -119,33 +120,56 @@ class HantuStock:
             "tr_id": tr_id,
         }
 
-
     def _request(self, url: str, headers: dict, params: dict, *, method: str = "get"):
-        backoff = 0.5
-        for attempt in range(6):
+        # API 과호출 방지를 위한 기본 지연 (초당 거래건수 제한 대비)
+        time.sleep(0.2)
+        try:
+            if method == "get":
+                resp = requests.get(url, headers=headers, params=params, timeout=30)
+            else:
+                resp = requests.post(url, headers=headers, data=json.dumps(params), timeout=30)
+
+            # 1. 상태 코드가 200이 아닌 경우 (예: 404 Not Found, 403 Forbidden 등)
+            if resp.status_code != 200:
+                print(f"[API-ERROR] HTTP {resp.status_code} - {resp.url}")
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"rt_cd": "1", "msg1": f"HTTP {resp.status_code} Error: API 경로를 찾을 수 없거나 권한이 없습니다."}
+                return resp.headers, data
+
+            # 2. JSON 응답 파싱
+            r_headers = resp.headers
             try:
-                if method == "get":
-                    resp = requests.get(url, headers=headers, params=params, timeout=30)
-                else:
-                    resp = requests.post(url, headers=headers, data=json.dumps(params), timeout=30)
-                r_headers = resp.headers
                 data = resp.json()
-                if data.get("rt_cd") != "0":
-                    # 과호출 제한 등 재시도 케이스
-                    if data.get("msg_cd") in {"EGW00201", "EGW00123"}:  # throttling 등
-                        time.sleep(backoff)
-                        backoff = min(backoff * 2, 5.0)
-                        continue
-                return r_headers, data
-            except requests.exceptions.ConnectTimeout:
-                print(f"[WARN] connect timeout, retry {attempt+1}")
-            except requests.exceptions.ReadTimeout:
-                print(f"[WARN] read timeout, retry {attempt+1}")
             except Exception as e:
-                print(f"[WARN] request error: {e}, retry {attempt+1}")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 5.0)
-        return {}, {"rt_cd": "1", "msg1": "request failed after retries"}
+                print(f"[API-ERROR] JSON 파싱 실패: {resp.text[:100]}...")
+                return r_headers, {"rt_cd": "1", "msg1": "API 서버에서 잘못된 응답을 반환했습니다."}
+
+            if data.get("rt_cd") != "0":
+                # EGW00201: 초당 거래건수 초과 시 딱 1번만 깔끔하게 재시도
+                if data.get("msg_cd") in {"EGW00201", "EGW00123"}:
+                    print(f"[API-WARN] 초당 거래건수 초과. 0.5초 대기 후 1회 재시도합니다.")
+                    time.sleep(0.5)
+                    if method == "get":
+                        resp = requests.get(url, headers=headers, params=params, timeout=30)
+                    else:
+                        resp = requests.post(url, headers=headers, data=json.dumps(params), timeout=30)
+                    
+                    r_headers = resp.headers
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {"rt_cd": "1", "msg1": "재시도 후 JSON 파싱 실패"}
+
+                # 재시도 후에도 에러면 최종 에러 출력
+                if data.get("rt_cd") != "0":
+                    print(f"[API-ERROR] {data.get('msg1')} (msg_cd: {data.get('msg_cd')})")
+
+            return r_headers, data
+        except Exception as e:
+            print(f"[REQUEST-ERROR] {e}")
+            return {}, {"rt_cd": "1", "msg1": f"request failed: {e}"}
 
     # -------------------- 시세 --------------------
     def get_stock_price(self, ticker: str) -> dict:

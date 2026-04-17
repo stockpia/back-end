@@ -24,7 +24,7 @@ try:
     from .HantuStock import HantuStock
 except ImportError:
     try:
-        from HantuStock import HantuStock
+        from .HantuStock import HantuStock
     except ImportError:
         HantuStock = None
 
@@ -32,7 +32,7 @@ try:
     from .dart_client import DartClient
 except ImportError:
     try:
-        from dart_client import DartClient
+        from .dart_client import DartClient
     except ImportError:
         DartClient = None
 

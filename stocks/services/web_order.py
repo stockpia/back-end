@@ -12,6 +12,8 @@ Web_06 매수/매도 주문 API
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
 
+from .HantuStock import HantuStock
+
 load_dotenv()
 
 
@@ -29,7 +31,6 @@ class WebOrder:
 
     def __init__(self):
         """Initialize"""
-        from HantuStock import HantuStock
         self.hantu = HantuStock()
 
     # ========================================
