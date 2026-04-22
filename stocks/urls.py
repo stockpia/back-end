@@ -85,21 +85,21 @@ urlpatterns = [
     path('accounts/signout', KisAccountSignOutView.as_view(), name='account-signout'),
 
 # Web 06 매매
-    # 1. GET /api/v1/stocks/{ticker}/orderbook : 특정 종목의 호가, 현재가, 체결강도 조회
+    # 1. GET /api/web/stocks/{ticker}/orderbook : 특정 종목의 호가, 현재가, 체결강도 조회
     path('stocks/<str:ticker>/orderbook', OrderBookView.as_view(), name='stock-orderbook'),
     
-    # 2. GET /api/v1/account/balance : 현재 사용자의 예수금(구매 가능 금액) 및 계좌 상태 조회
+    # 2. GET /api/web/account/balance : 현재 사용자의 예수금(구매 가능 금액) 및 계좌 상태 조회
     path('account/balance', AccountBalanceView.as_view(), name='account-balance'),
     
-    # 3. GET /api/v1/account/holdings/{ticker} : 특정 종목의 보유 수량, 평단가 조회
+    # 3. GET /api/web/account/holdings/{ticker} : 특정 종목의 보유 수량, 평단가 조회
     path('account/holdings/<str:ticker>', AccountHoldingsView.as_view(), name='account-holdings'),
     
-    # 4. POST /api/v1/orders : 매수/매도 주문 접수
+    # 4. POST /api/web/orders : 매수/매도 주문 접수
     path('orders', OrderView.as_view(), name='place-order'),
     
-    # 5. GET /api/v1/orders/pending : 체결 대기 중인 미체결 주문 리스트 조회
+    # 5. GET /api/web/orders/pending : 체결 대기 중인 미체결 주문 리스트 조회
     path('orders/pending', PendingOrdersView.as_view(), name='pending-orders'),
     
-    # 6. DELETE /api/v1/orders/{order_id} : 한국투자증권 API를 호출하여 특정 미체결 주문 취소
+    # 6. DELETE /api/web/orders/{order_id} : 한국투자증권 API를 호출하여 특정 미체결 주문 취소
     path('orders/<str:order_id>', CancelOrderView.as_view(), name='cancel-order'),
 ]

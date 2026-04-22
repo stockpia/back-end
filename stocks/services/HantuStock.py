@@ -6,7 +6,6 @@ import time
 import requests
 import json
 from datetime import datetime
-import sys
 
 try:
     import FinanceDataReader as fdr
@@ -102,15 +101,15 @@ class HantuStock:
             "appkey": self._api_key,
             "appsecret": self._secret_key,
         }
-        
+
         try:
             res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
             data = res.json()
             if "access_token" in data:
                 return data["access_token"]
-            print(f"[WARN] token error: {data}", file=sys.stderr)
+            print(f"[WARN] token error: {data}")
         except Exception as e:
-            print(f"[ERROR] get_access_token (exception): {e}", file=sys.stderr)
+            print(f"[ERROR] get_access_token: {e}")
         raise RuntimeError("Failed to get access token")
 
     def _header(self, tr_id: str) -> dict:
@@ -133,7 +132,7 @@ class HantuStock:
 
             # 1. 상태 코드가 200이 아닌 경우 (예: 404 Not Found, 403 Forbidden 등)
             if resp.status_code != 200:
-                print(f"[API-ERROR] HTTP {resp.status_code} - {resp.url}", file=sys.stderr)
+                print(f"[API-ERROR] HTTP {resp.status_code} - {resp.url}")
                 try:
                     data = resp.json()
                 except Exception:
@@ -145,13 +144,12 @@ class HantuStock:
             try:
                 data = resp.json()
             except Exception as e:
-                print(f"[API-ERROR] JSON 파싱 실패: {resp.text[:100]}...", file=sys.stderr)
+                print(f"[API-ERROR] JSON 파싱 실패: {resp.text[:100]}...")
                 return r_headers, {"rt_cd": "1", "msg1": "API 서버에서 잘못된 응답을 반환했습니다."}
 
             if data.get("rt_cd") != "0":
                 # EGW00201: 초당 거래건수 초과 시 딱 1번만 깔끔하게 재시도
                 if data.get("msg_cd") in {"EGW00201", "EGW00123"}:
-                    print(f"[API-WARN] 초당 거래건수 초과. 0.5초 대기 후 1회 재시도합니다.", file=sys.stderr)
                     time.sleep(0.5)
                     if method == "get":
                         resp = requests.get(url, headers=headers, params=params, timeout=30)
@@ -164,13 +162,9 @@ class HantuStock:
                     except Exception:
                         data = {"rt_cd": "1", "msg1": "재시도 후 JSON 파싱 실패"}
 
-                # 재시도 후에도 에러면 최종 에러 출력
-                if data.get("rt_cd") != "0":
-                    print(f"[API-ERROR] {data.get('msg1')} (msg_cd: {data.get('msg_cd')})", file=sys.stderr)
-
             return r_headers, data
         except Exception as e:
-            print(f"[REQUEST-ERROR] {e}", file=sys.stderr)
+            print(f"[REQUEST-ERROR] {e}")
             return {}, {"rt_cd": "1", "msg1": f"request failed: {e}"}
 
     # -------------------- 시세 --------------------
