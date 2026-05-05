@@ -65,16 +65,33 @@ class StockTickerConsumer(AsyncWebsocketConsumer):
         await self.accept()
         
         # 연결 시 첫 데이터 전송
-        await self.send_initial_price()
+        await self.send_price_data()
+        
+        # 워커 없이 웹소켓 자체적으로 3초마다 시세를 조회하는 백그라운드 태스크 실행
+        self.update_task = asyncio.create_task(self.price_update_loop())
 
     async def disconnect(self, close_code):
+        # 연결이 끊어지면 시세 조회 태스크도 중지
+        if hasattr(self, 'update_task'):
+            self.update_task.cancel()
+            
         # 그룹에서 탈퇴
         await self.channel_layer.group_discard(
             self.room_group_name,
             self.channel_name
         )
 
-    async def send_initial_price(self):
+    async def price_update_loop(self):
+        """주기적으로 시세를 조회하여 프론트엔드로 전송하는 루프"""
+        try:
+            while True:
+                await asyncio.sleep(3)  # 3초 대기 (API 과호출 방지를 위해 조절 가능)
+                await self.send_price_data()
+        except asyncio.CancelledError:
+            # 태스크가 취소(연결 종료)되면 조용히 종료
+            pass
+
+    async def send_price_data(self):
         """연결 시 현재가를 즉시 조회하여 전송"""
         try:
             price_info = stock.get_market_ohlcv_by_date(stock.get_nearest_business_day(), stock.get_nearest_business_day(), self.symbol)
