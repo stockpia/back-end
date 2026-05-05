@@ -25,9 +25,9 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-a-default-secret-key-
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # .env 파일에 DEBUG=true 를 설정하면 디버그 모드가 켜집니다.
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['.onrender.com', '127.0.0.1', 'localhost']
 
 
 # Application definition
