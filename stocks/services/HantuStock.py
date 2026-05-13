@@ -6,6 +6,7 @@ import time
 import requests
 import json
 from datetime import datetime
+import sys
 
 try:
     import FinanceDataReader as fdr
@@ -101,7 +102,7 @@ class HantuStock:
             "appkey": self._api_key,
             "appsecret": self._secret_key,
         }
-
+        
         try:
             res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
             data = res.json()
@@ -109,7 +110,7 @@ class HantuStock:
                 return data["access_token"]
             print(f"[WARN] token error: {data}")
         except Exception as e:
-            print(f"[ERROR] get_access_token: {e}")
+            print(f"[ERROR] get_access_token (exception): {e}")
         raise RuntimeError("Failed to get access token")
 
     def _header(self, tr_id: str) -> dict:
@@ -161,6 +162,10 @@ class HantuStock:
                         data = resp.json()
                     except Exception:
                         data = {"rt_cd": "1", "msg1": "재시도 후 JSON 파싱 실패"}
+
+                # 재시도 후에도 에러면 최종 에러 출력
+                if data.get("rt_cd") != "0":
+                    print(f"[API-ERROR] {data.get('msg1')} (msg_cd: {data.get('msg_cd')})")
 
             return r_headers, data
         except Exception as e:
@@ -973,20 +978,20 @@ class HantuStock:
             headers = self._header(tr_id)
 
         params = {
-            "fid_cond_mrkt_div_code":  market,
-            "fid_cond_scr_div_code":   scr_div,
-            "fid_input_iscd":          "0000",
-            "fid_rank_sort_cls_code":  sort_cls,
-            "fid_input_cnt_1":         "0",
-            "fid_prc_cls_code":        "0",
-            "fid_input_price_1":       "",
-            "fid_input_price_2":       "",
-            "fid_vol_cnt":             "",
-            "fid_trgt_cls_code":       "0",
-            "fid_trgt_exls_cls_code":  "0",
-            "fid_div_cls_code":        "0",
-            "fid_rsfl_rate1":          "",
-            "fid_rsfl_rate2":          "",
+            "FID_COND_MRKT_DIV_CODE":  market,
+            "FID_COND_SCR_DIV_CODE":   scr_div,
+            "FID_INPUT_ISCD":          "0000",
+            "FID_RANK_SORT_CLS_CODE":  sort_cls,
+            "FID_INPUT_CNT_1":         "0",
+            "FID_PRC_CLS_CODE":        "0",
+            "FID_INPUT_PRICE_1":       "",
+            "FID_INPUT_PRICE_2":       "",
+            "FID_VOL_CNT":             "",
+            "FID_TRGT_CLS_CODE":       "0",
+            "FID_TRGT_EXLS_CLS_CODE":  "0",
+            "FID_DIV_CLS_CODE":        "0",
+            "FID_RSFL_RATE1":          "",
+            "FID_RSFL_RATE2":          "",
         }
 
         _, res = self._request(base_url + path, headers, params)

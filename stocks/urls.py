@@ -84,7 +84,7 @@ urlpatterns = [
     # POST /api/web/accounts/signout
     path('accounts/signout', KisAccountSignOutView.as_view(), name='account-signout'),
 
-# Web 06 매매
+    # Web 06 매매
     # 1. GET /api/web/stocks/{ticker}/orderbook : 특정 종목의 호가, 현재가, 체결강도 조회
     path('stocks/<str:ticker>/orderbook', OrderBookView.as_view(), name='stock-orderbook'),
     

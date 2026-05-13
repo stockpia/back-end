@@ -20,14 +20,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
+# SECURITY WARNING: keep the secret key used in production production!
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-a-default-secret-key-for-development')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # .env 파일에 DEBUG=true 를 설정하면 디버그 모드가 켜집니다.
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = ['.onrender.com', '127.0.0.1', 'localhost']
+# Render 배포 시에는 Render 도메인만 명시하는 것이 좋습니다.
+# 로컬 개발 및 WebSocket 테스트를 위해 '*'로 임시 설정합니다.
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -59,15 +61,16 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS 설정: 모든 출처에서의 요청을 허용
+# CORS 설정: 모든 출처에서의 요청을 허용 (개발 시 편의)
 CORS_ALLOW_ALL_ORIGINS = True
 
-# 특정 출처
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",
-#     "http://127.0.0.1:3000",
-#     "https://stockpia-api.onrender.com",
-# ]
+# 특정 출처 (프로덕션 환경에서는 CORS_ALLOW_ALL_ORIGINS 대신 사용 권장)
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://stockpia-api.onrender.com",
+    "http://localhost:5173", # WebSocket 테스트를 위해 추가
+]
 
 
 ROOT_URLCONF = 'stockpia.urls'
