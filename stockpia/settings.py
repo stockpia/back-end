@@ -164,3 +164,49 @@ CHANNEL_LAYERS = {
         },
     },
 }
+
+# drf-yasg Swagger UI 설정
+if DEBUG:
+    # 로컬 개발 환경 설정
+    SWAGGER_SETTINGS = {
+        'USE_HTTPS_AS_DEFAULT': False, # 로컬에서는 HTTP 사용
+        'DEFAULT_API_URL': 'http://127.0.0.1:8000/api/web', # 로컬 개발 서버 URL
+    }
+else:
+    # Render 배포 환경 설정
+    SWAGGER_SETTINGS = {
+        'USE_HTTPS_AS_DEFAULT': True, # Render에서는 HTTPS 사용
+        'DEFAULT_API_URL': 'https://stockpia-api.onrender.com/api/web', # Render 배포 URL
+    }
+
+# 공통 설정 (위에서 정의된 SWAGGER_SETTINGS에 추가)
+SWAGGER_SETTINGS.update({
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header'
+        }
+    },
+    'SUPPORTED_SUBMIT_METHODS': [
+        'get',
+        'post',
+        'put',
+        'delete',
+        'patch'
+    ],
+    'OPERATIONS_SORTER': 'alpha',
+    'TAGS_SORTER': 'alpha',
+    'DOC_EXPANSION': 'none', # 'none', 'list', 'full'
+    'SHOW_REQUEST_HEADERS': True,
+    'JSON_EDITOR': True,
+    'DEFAULT_MODEL_RENDERING': 'example',
+    'DISPLAY_OPERATION_ID': False,
+    'DISPLAY_REQUEST_DURATION': True,
+    'DEEP_LINKING': True,
+    'SHOW_EXTENSIONS': True,
+    'DEFAULT_MODEL_DEPTH': 3,
+})
+
+# Render 배포 환경에서 FORCE_SCRIPT_NAME 경고를 해결하기 위해 추가
+FORCE_SCRIPT_NAME = None
