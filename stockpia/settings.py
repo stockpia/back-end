@@ -20,16 +20,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production production!
+# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-a-default-secret-key-for-development')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# .env 파일에 DEBUG=true 를 설정하면 디버그 모드가 켜집니다.
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
-# Render 배포 시에는 Render 도메인만 명시하는 것이 좋습니다.
-# 로컬 개발 및 WebSocket 테스트를 위해 '*'로 임시 설정합니다.
-ALLOWED_HOSTS = ['*']
+# AWS 배포 및 로컬 개발 환경을 위한 호스트 설정
+ALLOWED_HOSTS = ['.amazonaws.com', '127.0.0.1', 'localhost']
 
 
 # Application definition
@@ -153,7 +151,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ASGI & Channels
 ASGI_APPLICATION = 'stockpia.asgi.application'
 
-# Render.com 배포를 위한 Redis URL 환경 변수 사용
+# AWS ElastiCache 등 외부 Redis 사용을 위한 환경 변수
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
 
 CHANNEL_LAYERS = {
@@ -166,21 +164,8 @@ CHANNEL_LAYERS = {
 }
 
 # drf-yasg Swagger UI 설정
-if DEBUG:
-    # 로컬 개발 환경 설정
-    SWAGGER_SETTINGS = {
-        'USE_HTTPS_AS_DEFAULT': False, # 로컬에서는 HTTP 사용
-        'DEFAULT_API_URL': 'http://127.0.0.1:8000/api/web', # 로컬 개발 서버 URL
-    }
-else:
-    # Render 배포 환경 설정
-    SWAGGER_SETTINGS = {
-        'USE_HTTPS_AS_DEFAULT': True, # Render에서는 HTTPS 사용
-        'DEFAULT_API_URL': 'https://stockpia-api.onrender.com/api/web', # Render 배포 URL
-    }
-
-# 공통 설정 (위에서 정의된 SWAGGER_SETTINGS에 추가)
-SWAGGER_SETTINGS.update({
+SWAGGER_SETTINGS = {
+    'USE_HTTPS_AS_DEFAULT': not DEBUG, # DEBUG=False (배포)일 때만 HTTPS 사용
     'SECURITY_DEFINITIONS': {
         'Bearer': {
             'type': 'apiKey',
@@ -197,7 +182,7 @@ SWAGGER_SETTINGS.update({
     ],
     'OPERATIONS_SORTER': 'alpha',
     'TAGS_SORTER': 'alpha',
-    'DOC_EXPANSION': 'none', # 'none', 'list', 'full'
+    'DOC_EXPANSION': 'none',
     'SHOW_REQUEST_HEADERS': True,
     'JSON_EDITOR': True,
     'DEFAULT_MODEL_RENDERING': 'example',
@@ -206,7 +191,4 @@ SWAGGER_SETTINGS.update({
     'DEEP_LINKING': True,
     'SHOW_EXTENSIONS': True,
     'DEFAULT_MODEL_DEPTH': 3,
-})
-
-# Render 배포 환경에서 FORCE_SCRIPT_NAME 경고를 해결하기 위해 추가
-FORCE_SCRIPT_NAME = None
+}

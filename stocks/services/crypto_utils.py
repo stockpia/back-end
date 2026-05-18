@@ -3,10 +3,10 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 import base64
 
-# .env 파일에서 암호화 키를 가져옵니다.
-# 이 키는 32바이트 (AES-256)여야 합니다.
-# .env 파일에 `ENCRYPTION_KEY=your_32_byte_secret_key_here` 형식으로 추가해야 합니다.
-ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', 'default_32_byte_secret_key_1234').encode('utf-8')
+# .env 파일에서 암호화 키를 가져오거나, 없으면 유효한 32바이트 기본 키를 사용합니다.
+ENCRYPTION_KEY_STR = os.environ.get('ENCRYPTION_KEY', 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6')
+ENCRYPTION_KEY = ENCRYPTION_KEY_STR.encode('utf-8')
+
 if len(ENCRYPTION_KEY) != 32:
     raise ValueError("ENCRYPTION_KEY must be 32 bytes long for AES-256.")
 
