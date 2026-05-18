@@ -799,6 +799,56 @@ class KisAccountConnectView(APIView):
         return Response({"message": message}, status=status.HTTP_200_OK)
 
 
+class UserDetailView(APIView):
+    """
+    사용자 정보 조회, 수정, 삭제 API
+    GET, PATCH, DELETE /api/web/users/{user_id}/
+    """
+
+    def get(self, request, user_id):
+        try:
+            user = User.objects.get(user_id=user_id)
+            data = {
+                "user_id": user.user_id,
+                "phone": user.phone,
+                "name": user.name,
+                "birthdate": user.birthdate,
+                "notify_morning": user.notify_morning,
+                "notify_evening": user.notify_evening,
+                "notify_event": user.notify_event,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at,
+            }
+            return Response(data)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+    def patch(self, request, user_id):
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        # 변경 가능한 필드들
+        updatable_fields = ['name', 'birthdate', 'notify_morning', 'notify_evening', 'notify_event']
+
+        for field in updatable_fields:
+            if field in request.data:
+                setattr(user, field, request.data[field])
+
+        user.save()
+
+        return Response({"message": "사용자 정보가 성공적으로 업데이트되었습니다."})
+
+    def delete(self, request, user_id):
+        try:
+            user = User.objects.get(user_id=user_id)
+            user.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+
 '''
 class StockFavoriteToggleView(APIView):
     """

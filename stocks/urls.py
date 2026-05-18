@@ -6,7 +6,7 @@ from .views import (
     AveragingSaveView, AveragingHistoryView,
     StockDetailReportView,
     StockReportView,
-    UserSignUpView, UserSignInView, KisAccountConnectView, # 신규/수정된 뷰
+    UserSignUpView, UserSignInView, KisAccountConnectView, UserDetailView, # UserDetailView 추가
     OrderBookView, AccountBalanceView, AccountHoldingsView,
     OrderView, PendingOrdersView, CancelOrderView,
 )
@@ -15,6 +15,7 @@ urlpatterns = [
     # 사용자 인증 및 계좌 연동
     path('users/signup', UserSignUpView.as_view(), name='user-signup'),
     path('users/signin', UserSignInView.as_view(), name='user-signin'),
+    path('users/<uuid:user_id>/', UserDetailView.as_view(), name='user-detail'),
     path('kis/connect', KisAccountConnectView.as_view(), name='kis-connect'),
 
     # web01-1 종목 차트 API (/api/web/stocks/{symbol}/chart)

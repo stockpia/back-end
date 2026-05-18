@@ -97,6 +97,7 @@ WSGI_APPLICATION = 'stockpia.wsgi.application'
 
 DATABASES = {
     'default': dj_database_url.config(
+        # DATABASE_URL 환경 변수가 없으면 로컬 sqlite3 사용
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
     )
 }

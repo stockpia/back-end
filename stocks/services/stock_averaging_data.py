@@ -67,17 +67,17 @@ class StockAveragingDataProvider:
         """
         try:
             # 보유 종목 조회
-            holdings = self.hantu.get_holdings()
+            holdings = self.hantu.get_holding_stock_detail()
 
             # 해당 종목 찾기
             holding = None
             for item in holdings:
-                if item.get('symbol') == symbol:
+                if item.get('pdno') == symbol:
                     holding = item
                     break
 
             # 종목명 조회 (간단하게 처리)
-            company_name = holding.get('name', '') if holding else self._get_company_name(symbol)
+            company_name = holding.get('prdt_name', '') if holding else self._get_company_name(symbol)
 
             if not holding:
                 return {
@@ -88,9 +88,9 @@ class StockAveragingDataProvider:
                 }
 
             # 보유 정보 구성
-            quantity = int(holding.get('quantity', 0))
-            avg_price = float(holding.get('avg_price', 0))
-            current_price = float(holding.get('current_price', 0))
+            quantity = int(holding.get('hldg_qty', 0))
+            avg_price = float(holding.get('pchs_avg_prc', 0))
+            current_price = float(holding.get('prpr', 0))
 
             total_cost = avg_price * quantity
             current_value = current_price * quantity

@@ -104,7 +104,7 @@ class HantuStock:
         }
         
         try:
-            res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
+            res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30) # timeout 30초로 증가
             data = res.json()
             if "access_token" in data:
                 return data["access_token"]

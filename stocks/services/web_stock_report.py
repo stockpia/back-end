@@ -47,7 +47,7 @@ class WebStockReport:
         self.gemini_key = os.environ.get("GEMINI_API_KEY")
         if self.gemini_key:
             try:
-                import google.generativeai as genai
+                import google.genai as genai
                 genai.configure(api_key=self.gemini_key)
                 self.genai = genai
             except ImportError:
