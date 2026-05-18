@@ -1,9 +1,11 @@
 import requests
 import urllib.parse
+import os
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.core.cache import cache
+from django.contrib.auth.hashers import check_password
 
 from .services.stock_chart_data import StockChartDataProvider
 from .services.stock_list_data import StockListDataProvider
@@ -12,6 +14,7 @@ from .services.stock_averaging_data import StockAveragingDataProvider
 from .services.web_stock_report import WebStockReport
 from .services.web_detail_report import WebDetailReport
 from .services.web_order import WebOrder
+from .models import User, KisAccount
 
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -698,134 +701,105 @@ class StockReportView(APIView):
             return Response(error_response, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-from .models import KisAccount
-
-
-class KisAccountSignUpView(APIView):
+class UserSignUpView(APIView):
     """
-    한국투자증권 계좌 연동 및 회원가입 API
-    POST /api/web/accounts/signup
+    사용자 회원가입 API
+    POST /api/web/users/signup
     """
-
     def post(self, request):
-        user_id = request.data.get('user_id', 'default_user')
+        phone = request.data.get('phone')
         name = request.data.get('name')
         birthdate = request.data.get('birthdate')
-        phone = request.data.get('phone')
-        account_number = request.data.get('account_number')
-        app_key = request.data.get('app_key')
-        app_secret_key = request.data.get('app_secret_key')
-        env = request.data.get('env', 'vps')
+        password = request.data.get('password')
 
-        if not all([name, birthdate, phone, account_number, app_key, app_secret_key]):
+        if not all([phone, name, birthdate, password]):
             return Response({"error": "모든 필수 정보를 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 유효성 검사 (HantuStock으로 테스트 연결해보기)
-        try:
-            from .services.HantuStock import HantuStock
-            # 잔고 조회를 찔러봄
-            test_hantu = HantuStock(
-                api_key=app_key,
-                secret_key=app_secret_key,
-                account_id=account_number[:8] if '-' in account_number else account_number,
-                env=env  # 모의투자 또는 실전투자
-            )
-            # 토큰 발급 테스트 (실패시 예외 발생)
-            if not test_hantu._access_token:
-                raise ValueError("토큰 발급 실패")
-        except Exception as e:
-            return Response({
-                "error": "계좌 연동 실패. 입력하신 앱 키와 시크릿 키, 계좌번호를 다시 확인해주세요.",
-                "detail": str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+        if User.objects.filter(phone=phone).exists():
+            return Response({"error": "이미 가입된 전화번호입니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # DB 저장 (기존 정보가 있으면 덮어쓰기)
-        account, created = KisAccount.objects.update_or_create(
-            user_id=user_id,
-            defaults={
-                'name': name,
-                'birthdate': birthdate,
-                'phone': phone,
-                'account_number': account_number,
-                'app_key': app_key,
-                'app_secret_key': app_secret_key,
-                'env': env
-            }
-        )
-        
-        message = "한국투자증권 계좌 연동 및 회원가입이 성공적으로 완료되었습니다." if created else "계좌 정보가 성공적으로 업데이트되었습니다."
+        user = User(phone=phone, name=name, birthdate=birthdate)
+        user.set_password(password)
+        user.save()
 
         return Response({
-            "message": message,
-            "name": account.name,
-            "account_number": account.account_number
-        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+            "message": "회원가입이 성공적으로 완료되었습니다.",
+            "user_id": user.user_id
+        }, status=status.HTTP_201_CREATED)
 
 
-class KisAccountSignInView(APIView):
+class UserSignInView(APIView):
     """
-    이름과 전화번호로 로그인 API
-    POST /api/web/accounts/signin
+    사용자 로그인 API
+    POST /api/web/users/signin
     """
     def post(self, request):
-        name = request.data.get('name')
         phone = request.data.get('phone')
+        password = request.data.get('password')
 
-        if not all([name, phone]):
-            return Response({"error": "이름과 전화번호를 모두 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+        if not all([phone, password]):
+            return Response({"error": "전화번호와 비밀번호를 모두 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            account = KisAccount.objects.get(name=name, phone=phone)
+            user = User.objects.get(phone=phone)
+            if not user.check_password(password):
+                return Response({"error": "비밀번호가 일치하지 않습니다."}, status=status.HTTP_400_BAD_REQUEST)
             
-            # "touch" the object to update the `updated_at` timestamp
-            account.save()
-
+            # 여기서 JWT 토큰 또는 세션 생성 로직 추가 (지금은 user_id만 반환)
             return Response({
                 "message": "로그인에 성공했습니다.",
-                "name": account.name,
-                "account_number": account.account_number,
-                "user_id": account.user_id
+                "user_id": user.user_id,
+                "name": user.name
             }, status=status.HTTP_200_OK)
-        except KisAccount.DoesNotExist:
-            return Response({
-                "error": "일치하는 사용자 정보가 없습니다. 회원가입을 먼저 진행해주세요."
-            }, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({
-                "error": "로그인 중 오류가 발생했습니다.",
-                "detail": str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
 
 
-class KisAccountSignOutView(APIView):
+class KisAccountConnectView(APIView):
     """
-    로그아웃 API
-    POST /api/web/accounts/signout
+    KIS 계좌 연결 API (로그인 후 사용)
+    POST /api/web/kis/connect
     """
 
     def post(self, request):
-        user_id = request.data.get('user_id')
-
+        user_id = request.data.get('user_id') # 실제로는 인증된 사용자 정보에서 가져와야 함
         if not user_id:
-            return Response({"error": "user_id가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response({"error": "사용자 정보가 필요합니다."}, status=status.HTTP_401_UNAUTHORIZED)
+        
         try:
-            account = KisAccount.objects.get(user_id=user_id)
-            account.delete()
-            return Response({
-                "message": "로그아웃 되었습니다."
-            }, status=status.HTTP_200_OK)
-        except KisAccount.DoesNotExist:
-            return Response({
-                "error": "연동된 계좌 정보를 찾을 수 없습니다."
-            }, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({
-                "error": "로그아웃 중 오류가 발생했습니다.",
-                "detail": str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        # .env 파일에서 기본값 가져오기
+        app_key = os.environ.get('KIS_APP_KEY')
+        app_secret_key = os.environ.get('KIS_APP_SECRET')
+        account_id = os.environ.get('KIS_ACCOUNT_ID')
+        account_suffix = os.environ.get('KIS_ACCOUNT_SUFFIX')
+        env = os.environ.get('KIS_ENV', 'vps')
+        
+        if not all([app_key, app_secret_key, account_id, account_suffix]):
+            return Response({"error": ".env 파일에 KIS 관련 설정이 올바르지 않습니다."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        account_number = f"{account_id}-{account_suffix}"
+
+        # KisAccount 모델에 정보 저장/업데이트
+        kis_account, created = KisAccount.objects.update_or_create(
+            user=user,
+            defaults={
+                'account_number': account_number,
+                'env': env,
+            }
+        )
+        kis_account.set_app_key(app_key)
+        kis_account.set_app_secret_key(app_secret_key)
+        kis_account.save()
+        
+        message = "KIS 계좌가 성공적으로 연결되었습니다." if created else "KIS 계좌 정보가 업데이트되었습니다."
+        return Response({"message": message}, status=status.HTTP_200_OK)
 
 
+'''
 class StockFavoriteToggleView(APIView):
     """
     Web05 - 관심 종목 추가/해제 API
@@ -875,7 +849,7 @@ class StockFavoriteListView(APIView):
         web_report = WebStockReport()
         result = web_report.get_favorites(user_id)
         return Response(result)
-
+'''
 
 # Web_06: 실시간 주식 매매 관련 API
 

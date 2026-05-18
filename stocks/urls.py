@@ -1,16 +1,22 @@
 from django.urls import path
-from .views import (StockChartView, StockListView, StockHoldingView,# StockWatchlistView,
-                    StockNewsView, StockCommunityView, StockCommunityLatestView,
-                    AveragingHoldingView, AveragingCalculateQuantityView, AveragingCalculateAmountView,
-                    AveragingSaveView, AveragingHistoryView,
-                    StockDetailReportView,
-                    StockReportView, StockFavoriteToggleView, StockFavoriteListView,
-                    KisAccountSignUpView, KisAccountSignInView, KisAccountSignOutView,
-                    OrderBookView, AccountBalanceView, AccountHoldingsView,
-                    OrderView, PendingOrdersView, CancelOrderView,
-                    )
+from .views import (
+    StockChartView, StockListView, StockHoldingView,
+    StockNewsView, StockCommunityView, StockCommunityLatestView,
+    AveragingHoldingView, AveragingCalculateQuantityView, AveragingCalculateAmountView,
+    AveragingSaveView, AveragingHistoryView,
+    StockDetailReportView,
+    StockReportView,
+    UserSignUpView, UserSignInView, KisAccountConnectView, # 신규/수정된 뷰
+    OrderBookView, AccountBalanceView, AccountHoldingsView,
+    OrderView, PendingOrdersView, CancelOrderView,
+)
 
 urlpatterns = [
+    # 사용자 인증 및 계좌 연동
+    path('users/signup', UserSignUpView.as_view(), name='user-signup'),
+    path('users/signin', UserSignInView.as_view(), name='user-signin'),
+    path('kis/connect', KisAccountConnectView.as_view(), name='kis-connect'),
+
     # web01-1 종목 차트 API (/api/web/stocks/{symbol}/chart)
     path('stocks/<str:symbol>/chart', StockChartView.as_view()),
 
@@ -19,10 +25,6 @@ urlpatterns = [
 
     # web01-3 보유 종목 리스트 API (/api/web/stocks/holdings)
     path('stocks/holdings', StockHoldingView.as_view()),
-
-    # web01-4 관심 종목 리스트 API (/api/web/stocks/watchlist)
-    #path('stocks/watchlist', StockWatchlistView.as_view()),
-
 
     # web02-1 뉴스 리스트 API (/api/web/stocks/{symbol}/news)
     path('stocks/<str:symbol>/news', StockNewsView.as_view(), name='stock-news'),
@@ -64,27 +66,7 @@ urlpatterns = [
     # GET /api/web/stocks/{symbol}/report
     path('stocks/<str:symbol>/report', StockReportView.as_view(), name='stock-report'),
 
-    # web05-2 관심 종목 추가/해제
-    # POST /api/web/stocks/{symbol}/favorite
-    #path('stocks/<str:symbol>/favorite', StockFavoriteToggleView.as_view(), name='stock-favorite-toggle'),
-
-    # web05-3 관심 종목 목록 조회
-    # GET /api/web/favorites
-    path('favorites', StockFavoriteListView.as_view(), name='stock-favorite-list'),
-
-    # 계좌 연동 및 회원가입 API
-    # POST /api/web/accounts/signup
-    path('accounts/signup', KisAccountSignUpView.as_view(), name='account-signup'),
-    
-    # 이름과 전화번호로 로그인 API
-    # POST /api/web/accounts/signin
-    path('accounts/signin', KisAccountSignInView.as_view(), name='account-signin'),
-
-    # 로그아웃(계좌 연동 해제) API
-    # POST /api/web/accounts/signout
-    path('accounts/signout', KisAccountSignOutView.as_view(), name='account-signout'),
-
-    # Web 06 매매
+    # Web 06 매매 (경로를 /api/web/ 하위로 일원화)
     # 1. GET /api/web/stocks/{ticker}/orderbook : 특정 종목의 호가, 현재가, 체결강도 조회
     path('stocks/<str:ticker>/orderbook', OrderBookView.as_view(), name='stock-orderbook'),
     
