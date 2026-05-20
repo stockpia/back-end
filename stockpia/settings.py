@@ -26,8 +26,11 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-a-default-secret-key-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
-# AWS 배포 및 로컬 개발 환경을 위한 호스트 설정
-ALLOWED_HOSTS = ['.amazonaws.com', '127.0.0.1', 'localhost']
+# 배포 환경(Render, AWS) 및 로컬 개발 환경을 위한 호스트 설정
+ALLOWED_HOSTS = [
+    '.amazonaws.com', 'stockpia-api.onrender.com', # Render 배포 도메인
+    '127.0.0.1', 'localhost'
+]
 
 
 # Application definition
