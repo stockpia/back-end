@@ -48,3 +48,5 @@ zope.interface==6.2
 whitenoise==6.6.0
 python-dotenv==1.0.1
 tavily-python==0.3.3
+python-telegram-bot==21.6
+websocket-client==1.9.0
