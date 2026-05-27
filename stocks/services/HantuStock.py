@@ -29,6 +29,13 @@ _PROD_BASE_URL = "https://openapi.koreainvestment.com:9443"
 _prod_token: str | None = None
 _prod_token_time: float = 0.0
 
+# vps(모의) + 사용자별 KIS 토큰 캐시 — 프로세스 내 공유
+# 한투 OAuth 발급 한도: "1분에 1회" (EGW00133). 토큰 자체 수명: 24시간.
+# 같은 (app_key, env) 조합은 24시간 동안 1회만 발급하도록 보장.
+# 사용자별로 app_key 가 다르면 자동으로 별개 토큰 보관됨.
+_TOKEN_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+_TOKEN_TTL_SECONDS = 86000  # 24h - 약간의 안전 마진
+
 
 class HantuStock:
     def __init__(
@@ -93,6 +100,17 @@ class HantuStock:
         return prefix + codes[key]
 
     def _get_access_token(self) -> str:
+        """
+        (app_key, env) 단위 캐시 → 한투 "1분당 1회 발급(EGW00133)" 제한 우회.
+        같은 자격증명·환경 조합은 24시간 동안 같은 토큰 재사용.
+        """
+        cache_key = (self._api_key, self._env)
+        cached = _TOKEN_CACHE.get(cache_key)
+        if cached is not None:
+            token, issued_at = cached
+            if (time.time() - issued_at) < _TOKEN_TTL_SECONDS:
+                return token
+
         # 실전/모의 모두 토큰 발급 경로는 /oauth2/tokenP 입니다.
         token_path = "/oauth2/tokenP"
         url = self._base_url + token_path
@@ -102,12 +120,14 @@ class HantuStock:
             "appkey": self._api_key,
             "appsecret": self._secret_key,
         }
-        
+
         try:
             res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30) # timeout 30초로 증가
             data = res.json()
             if "access_token" in data:
-                return data["access_token"]
+                token = data["access_token"]
+                _TOKEN_CACHE[cache_key] = (token, time.time())
+                return token
             print(f"[WARN] token error: {data}")
         except Exception as e:
             print(f"[ERROR] get_access_token (exception): {e}")
