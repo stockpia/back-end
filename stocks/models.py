@@ -102,6 +102,10 @@ class LinkToken(models.Model):
     def is_expired(self):
         return self.expires_at < timezone.now()
 
+    def is_valid(self):
+        """미소비 + 미만료 인 토큰만 유효. /start <token> 시 봇이 이걸로 검증."""
+        return (not self.consumed) and (not self.is_expired())
+
 class WatchSymbol(models.Model):
     """
     관심 종목 (watch_symbols)

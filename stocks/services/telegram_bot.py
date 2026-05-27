@@ -22,6 +22,7 @@ django.setup()
 
 from asgiref.sync import sync_to_async  # noqa: E402
 from telegram import Update  # noqa: E402
+from telegram.error import TelegramError  # noqa: E402
 from telegram.ext import (  # noqa: E402
     Application,
     CommandHandler,
@@ -88,6 +89,22 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(chat_id=chat.id, text="pong")
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """미처리 예외 캐치 → 로그 + 사용자에게 안내."""
+    logger.exception("Unhandled error while processing update: %s", context.error)
+    try:
+        if isinstance(update, Update) and update.effective_chat is not None:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    "⚠️ 일시적 오류가 발생했어요. 잠시 후 다시 시도해주세요.\n"
+                    "계속 같은 문제가 반복되면 관리자에게 알려주세요."
+                ),
+            )
+    except TelegramError:
+        pass
+
+
 # ─── DB 작업 (sync ORM 을 async wrapper 로) ───────────────
 
 @sync_to_async
@@ -145,6 +162,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("ping", cmd_ping))
+    app.add_error_handler(on_error)
 
     # MVP: long-polling. 운영 webhook 전환은 추후.
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
