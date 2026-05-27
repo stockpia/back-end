@@ -97,21 +97,9 @@ class WebStockReport:
     # ========================================
 
     def _generate_llm_text(self, prompt: str) -> Optional[str]:
-        """LLM 텍스트 생성"""
-        if not self.genai:
-            return None
-        try:
-            model = self.genai.GenerativeModel(
-                'gemini-2.5-flash',
-                system_instruction="당신은 한국 주식시장 전문 애널리스트입니다. 초보 투자자가 이해할 수 있도록 쉽고 친근하게 설명합니다. 매수/매도 추천은 하지 않고 정보 제공만 합니다."
-            )
-            response = model.generate_content(
-                prompt,
-                generation_config={"temperature": 0.3, "max_output_tokens": 4096}
-            )
-            return response.text.strip()
-        except Exception:
-            return None
+        """LLM 텍스트 생성. OpenAI primary → Gemini fallback (llm_client 가 자동 처리)."""
+        from .llm_client import generate
+        return generate(prompt, temperature=0.3, max_output_tokens=4096)
 
     def _clean_markdown(self, text: str) -> str:
         """마크다운 서식 제거"""
