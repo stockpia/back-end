@@ -50,3 +50,4 @@ python-dotenv==1.0.1
 tavily-python==0.7.24
 python-telegram-bot==21.6
 websocket-client==1.9.0
+google-generativeai==0.8.3
