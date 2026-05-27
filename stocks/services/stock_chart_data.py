@@ -13,12 +13,37 @@
 import time
 import pandas as pd
 from datetime import datetime, timedelta
+from functools import lru_cache
 from typing import Dict, Optional, List
 
 try:
     import FinanceDataReader as fdr
 except ImportError:
     fdr = None
+
+try:
+    from pykrx import stock as _pykrx_stock
+except ImportError:
+    _pykrx_stock = None
+
+
+@lru_cache(maxsize=4096)
+def _lookup_company_name(ticker: str) -> str:
+    """
+    종목코드 → 회사명 lookup.
+    한투 inquire-price 응답엔 회사명 필드가 없어 fallback 으로 종목코드가 그대로
+    표시되던 문제 해소용. pykrx 가 가장 빠르고 정확한 한국 종목명 lookup 라이브러리.
+    실패 시 ticker 그대로 반환.
+    """
+    if not ticker or not ticker.isdigit():
+        return ticker
+    if _pykrx_stock is None:
+        return ticker
+    try:
+        name = _pykrx_stock.get_market_ticker_name(ticker)
+        return name or ticker
+    except Exception:
+        return ticker
 
 try:
     from .HantuStock import HantuStock
@@ -130,7 +155,7 @@ class StockChartDataProvider:
                 data = self._get_stock_price_data(ticker)
                 if "error" not in data:
                     return {
-                        "company_name": data.get('name', ticker),
+                        "company_name": data.get('name') or _lookup_company_name(ticker),
                         "ticker": ticker,
                         "current_price": data.get('current_price', 0),
                         "price_change": data.get('price_change', 0),
@@ -157,7 +182,7 @@ class StockChartDataProvider:
             change_rate = (price_change / prev_close) * 100 if prev_close > 0 else 0
 
             return {
-                "company_name": ticker,  # FDR에서는 종목명 조회 불가할 수 있음
+                "company_name": _lookup_company_name(ticker),  # pykrx 로 종목명 lookup
                 "ticker": ticker,
                 "current_price": current_price,
                 "price_change": price_change,
