@@ -36,6 +36,12 @@ _prod_token_time: float = 0.0
 _TOKEN_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
 _TOKEN_TTL_SECONDS = 86000  # 24h - 약간의 안전 마진
 
+# Daphne 재시작 직후 여러 view 가 동시에 HantuStock() 을 생성하면
+# 모두 cache miss 로 판단하여 동시에 /oauth2/tokenP 를 호출 → 한투 1분 제한 충돌.
+# Lock 으로 동시 발급 시도를 1건으로 직렬화.
+import threading
+_token_lock = threading.Lock()
+
 
 class HantuStock:
     def __init__(
@@ -103,35 +109,46 @@ class HantuStock:
         """
         (app_key, env) 단위 캐시 → 한투 "1분당 1회 발급(EGW00133)" 제한 우회.
         같은 자격증명·환경 조합은 24시간 동안 같은 토큰 재사용.
+        Lock 으로 동시 발급 race 보호 (double-check locking).
         """
         cache_key = (self._api_key, self._env)
+
+        # 빠른 경로: 락 없이 캐시 hit 면 그대로 반환
         cached = _TOKEN_CACHE.get(cache_key)
         if cached is not None:
             token, issued_at = cached
             if (time.time() - issued_at) < _TOKEN_TTL_SECONDS:
                 return token
 
-        # 실전/모의 모두 토큰 발급 경로는 /oauth2/tokenP 입니다.
-        token_path = "/oauth2/tokenP"
-        url = self._base_url + token_path
-        headers = {"content-type": "application/json"}
-        body = {
-            "grant_type": "client_credentials",
-            "appkey": self._api_key,
-            "appsecret": self._secret_key,
-        }
+        # 캐시 miss → 락 내부에서 한 번 더 확인 후 발급
+        with _token_lock:
+            cached = _TOKEN_CACHE.get(cache_key)
+            if cached is not None:
+                token, issued_at = cached
+                if (time.time() - issued_at) < _TOKEN_TTL_SECONDS:
+                    return token
 
-        try:
-            res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30) # timeout 30초로 증가
-            data = res.json()
-            if "access_token" in data:
-                token = data["access_token"]
-                _TOKEN_CACHE[cache_key] = (token, time.time())
-                return token
-            print(f"[WARN] token error: {data}")
-        except Exception as e:
-            print(f"[ERROR] get_access_token (exception): {e}")
-        raise RuntimeError("Failed to get access token")
+            # 실전/모의 모두 토큰 발급 경로는 /oauth2/tokenP 입니다.
+            token_path = "/oauth2/tokenP"
+            url = self._base_url + token_path
+            headers = {"content-type": "application/json"}
+            body = {
+                "grant_type": "client_credentials",
+                "appkey": self._api_key,
+                "appsecret": self._secret_key,
+            }
+
+            try:
+                res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30) # timeout 30초로 증가
+                data = res.json()
+                if "access_token" in data:
+                    token = data["access_token"]
+                    _TOKEN_CACHE[cache_key] = (token, time.time())
+                    return token
+                print(f"[WARN] token error: {data}")
+            except Exception as e:
+                print(f"[ERROR] get_access_token (exception): {e}")
+            raise RuntimeError("Failed to get access token")
 
     def _header(self, tr_id: str) -> dict:
         return {
