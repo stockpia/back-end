@@ -63,14 +63,18 @@ class WebStockReport:
     # ========================================
 
     def _collect_stock_data(self, symbol: str) -> Dict:
-        """종목 데이터 수집"""
-        data = {}
-        data["info"] = self.chart_provider.get_stock_info(symbol)
-        data["fundamental"] = self.chart_provider.get_fundamental_metrics(symbol)
-        data["technical"] = self.chart_provider.get_technical_indicators(symbol)
-        data["returns"] = self._calculate_returns(symbol)
-        data["dart"] = self.chart_provider.get_dart_metrics(symbol)
-        return data
+        """종목 데이터 수집 — 5개 데이터 소스(한투·FDR·RSI·수익률·DART) 병렬 호출."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            futures = {
+                "info":        ex.submit(self.chart_provider.get_stock_info,           symbol),
+                "fundamental": ex.submit(self.chart_provider.get_fundamental_metrics,  symbol),
+                "technical":   ex.submit(self.chart_provider.get_technical_indicators, symbol),
+                "returns":     ex.submit(self._calculate_returns,                       symbol),
+                "dart":        ex.submit(self.chart_provider.get_dart_metrics,          symbol),
+            }
+            return {k: f.result() for k, f in futures.items()}
 
     def _calculate_returns(self, symbol: str) -> Dict:
         """기간별 수익률 계산 (chart_provider FDR 캐시 활용)"""

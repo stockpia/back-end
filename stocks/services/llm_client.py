@@ -134,12 +134,22 @@ def _try_openai(prompt: str, system: str, temperature: float, max_tokens: int) -
         # gpt-5 시리즈: 종목 리포트는 분석/요약 task 라 high reasoning 불필요.
         # "low" 로 thinking 시간 단축 → 응답 30~50% 빠름. 퀄리티 영향 미미.
         kwargs["reasoning_effort"] = "low"
+        # gpt-5 의 verbosity 파라미터 — 응답을 간결하게.
+        # 리포트는 1~3문장이면 충분. 응답 토큰 자체도 줄어 추가 단축.
+        kwargs["verbosity"] = "low"
 
-    # SDK 버전에 따라 max_completion_tokens / max_tokens 어느 쪽이 맞는지 자동 폴백.
-    # 또 reasoning_effort 를 지원 안 하는 SDK 일 수도 있어 그 경우 빼고 재시도.
-    last_error = None
+    # SDK / 모델 버전에 따라:
+    #   - max_completion_tokens vs max_tokens
+    #   - verbosity, reasoning_effort 지원 여부
+    # 가 다를 수 있어 점진적으로 파라미터 빼면서 재시도.
+    last_error: Optional[Exception] = None
+    candidate_kwargs = [
+        kwargs,
+        {k: v for k, v in kwargs.items() if k != "verbosity"},
+        {k: v for k, v in kwargs.items() if k not in ("verbosity", "reasoning_effort")},
+    ]
     for token_key in ("max_completion_tokens", "max_tokens"):
-        for try_kwargs in (kwargs, {k: v for k, v in kwargs.items() if k != "reasoning_effort"}):
+        for try_kwargs in candidate_kwargs:
             try:
                 resp = client.chat.completions.create(**try_kwargs, **{token_key: max_tokens})
                 text = (resp.choices[0].message.content or "").strip()
