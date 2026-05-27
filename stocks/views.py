@@ -1138,3 +1138,66 @@ class TelegramUnlinkView(APIView):
             {"unlinked": bool(deleted)},
             status=status.HTTP_200_OK,
         )
+
+
+class UserNotifySettingsView(APIView):
+    """
+    사용자 알림 수신 설정 조회/변경.
+
+    GET  /api/web/users/notify-settings?user_id=<uuid>
+        → { "notify_morning": bool, "notify_evening": bool, "notify_event": bool }
+
+    PATCH /api/web/users/notify-settings
+        Body: {
+            "user_id": "<uuid>",
+            "notify_morning": bool,   # 선택
+            "notify_evening": bool,   # 선택
+            "notify_event":   bool    # 선택
+        }
+        → 변경된 후의 전체 설정 반환
+    """
+
+    ALLOWED_FIELDS = ("notify_morning", "notify_evening", "notify_event")
+
+    def _serialize(self, user: User) -> dict:
+        return {
+            "notify_morning": user.notify_morning,
+            "notify_evening": user.notify_evening,
+            "notify_event": user.notify_event,
+        }
+
+    def get(self, request):
+        user_id = (request.query_params.get("user_id") or "").strip()
+        if not user_id:
+            return Response({"error": "user_id 가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self._serialize(user), status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        user_id = (request.data.get("user_id") or "").strip()
+        if not user_id:
+            return Response({"error": "user_id 가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        changed = []
+        for field in self.ALLOWED_FIELDS:
+            if field in request.data:
+                value = request.data.get(field)
+                if not isinstance(value, bool):
+                    return Response(
+                        {"error": f"{field} 는 boolean 이어야 합니다."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                setattr(user, field, value)
+                changed.append(field)
+
+        if changed:
+            user.save(update_fields=changed)
+
+        return Response(self._serialize(user), status=status.HTTP_200_OK)
