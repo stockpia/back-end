@@ -80,11 +80,20 @@ class TelegramLink(models.Model):
 def get_token_expiry_date():
     return timezone.now() + timedelta(minutes=10)
 
+
+def _generate_link_token():
+    """
+    LinkToken.token 의 default. 함수 객체로 전달해야 row 생성 때마다 새 값이 평가됨.
+    `default=uuid.uuid4().hex` 처럼 호출 결과를 직접 전달하면 모듈 import 시점에 1회만
+    평가되어 모든 row 가 같은 PK 를 받게 됨 (IntegrityError).
+    """
+    return uuid.uuid4().hex
+
 class LinkToken(models.Model):
     """
     일회용 연동 토큰 (link_tokens)
     """
-    token = models.CharField(max_length=32, primary_key=True, default=uuid.uuid4().hex)
+    token = models.CharField(max_length=32, primary_key=True, default=_generate_link_token)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     expires_at = models.DateTimeField(default=get_token_expiry_date)
     consumed = models.BooleanField(default=False)
