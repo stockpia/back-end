@@ -99,7 +99,8 @@ class WebStockReport:
     def _generate_llm_text(self, prompt: str) -> Optional[str]:
         """LLM 텍스트 생성. OpenAI primary → Gemini fallback (llm_client 가 자동 처리)."""
         from .llm_client import generate
-        return generate(prompt, temperature=0.3, max_output_tokens=4096)
+        # 섹션별 응답은 1~5문장이면 충분 → 1024 로 한도 낮춰 LLM 이 빠르게 종료
+        return generate(prompt, temperature=0.3, max_output_tokens=1024)
 
     def _parse_opinion_response(self, raw: str) -> Dict:
         """
