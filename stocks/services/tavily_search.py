@@ -150,16 +150,30 @@ class TavilySearchClient:
         if not self.available:
             return {"error": "Tavily not available", "results": []}
 
-        query = f"{company_name} 주식 투자자 반응 의견"
+        # 한국 주식 커뮤니티 도메인 (네이버 종목토론실 + 디씨 종목갤러리 + 씽크풀 등)
+        # + 일반 도메인도 포함하여 검색 결과 풍부하게.
+        query = f"{company_name} 주식 토론 의견 전망 종목토론"
 
         try:
             response = self.client.search(
                 query=query,
                 search_depth="basic",
-                time_range="day",   # 최근 1일 — 커뮤니티는 더 짧은 주기
-                max_results=max_results,
+                time_range="week",   # 1주일로 확대 (1일은 결과 거의 0건)
+                max_results=max(max_results, 10),
                 include_answer=True,
-                include_domains=["naver.com", "hankyung.com", "mk.co.kr", "sedaily.com", "edaily.co.kr"]
+                include_domains=[
+                    # 종목 토론·커뮤니티
+                    "finance.naver.com",      # 네이버 금융 종목토론실
+                    "thinkpool.com",          # 씽크풀
+                    "investing.com",          # 인베스팅 (한국 종목 코멘트)
+                    "ssemble.com",            # 쎄믈
+                    "moneynet.co.kr",         # 머니넷
+                    # 보조: 일반 커뮤니티 + 뉴스 (시장 반응 인용)
+                    "dcinside.com",
+                    "ruliweb.com",
+                    "clien.net",
+                    "ppomppu.co.kr",
+                ],
             )
 
             return {

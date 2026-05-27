@@ -410,48 +410,69 @@ ROE: {fundamental.get('roe', 'N/A')}%{dart_section}
         }
 
     def _build_valuation(self, data: Dict, company_name: str) -> Dict:
-        """밸류에이션 (웹 확장판)"""
+        """밸류에이션 (웹 확장판). 0 값은 N/A 로 정규화 (적자 종목/ETN 처리)."""
         fundamental = data.get("fundamental", {})
 
-        prompt = f"""{company_name}의 밸류에이션 지표입니다.
-PER: {fundamental.get('per', 'N/A')} / PBR: {fundamental.get('pbr', 'N/A')} / ROE: {fundamental.get('roe', 'N/A')}%
-EPS: {fundamental.get('eps', 'N/A')}원
+        # 0 또는 None 은 "미제공 (N/A)" 로 간주.
+        # 음수는 의미 있는 값 (적자 PER -180 등) 이라 그대로 유지.
+        def _normalize(v):
+            if v is None or v == 0:
+                return None
+            return v
 
-웹 상세 리포트용으로 밸류에이션 해석을 작성해주세요 (3~4줄).
-- 업종 평균 대비 수준 언급
-- 고평가/저평가 여부 판단
-- "~에요", "~있어요" 친근한 말투
+        per = _normalize(fundamental.get("per"))
+        pbr = _normalize(fundamental.get("pbr"))
+        roe = _normalize(fundamental.get("roe"))
+        eps = _normalize(fundamental.get("eps"))
+
+        # ETN/ETF 또는 회사명 lookup 실패 시 prompt 에 명시
+        is_etn_like = company_name == data.get("info", {}).get("ticker", "")
+        ticker_hint = f"(종목코드 {company_name}, 회사명 lookup 미제공)" if is_etn_like else ""
+
+        def _fmt(v, unit=""):
+            return "N/A (미제공)" if v is None else f"{v}{unit}"
+
+        prompt = f"""{company_name} {ticker_hint} 밸류에이션 지표:
+PER: {_fmt(per)} / PBR: {_fmt(pbr)} / ROE: {_fmt(roe, '%')} / EPS: {_fmt(eps, '원')}
+
+웹 상세 리포트용 밸류에이션 해석 (3~4줄):
+- N/A 인 지표는 "제공 안 됨" 으로 인지하고 해당 지표 기반 판단 하지 말 것.
+  N/A 만 있으면 "이 종목은 밸류에이션 지표가 제공되지 않아 해석이 어려워요" 같이 안내.
+- 음수 PER/ROE 는 적자 종목 의미 (저평가 X). "적자 상태" 로 해석.
+- 업종 평균 대비 수준 언급 (가능한 경우)
 - 매수/매도 추천 금지
-- 인사말 없이 바로 해석만 작성
-- 위에 제공된 데이터만 언급하세요. 데이터에 없는 지표는 언급하지 마세요."""
+- "~에요", "~있어요" 친근한 말투, 인사말 없이 해석만"""
 
         result = self._generate_llm_text(prompt)
         interpretation = ""
         if result:
             cleaned = self._clean_markdown(result)
-            # 인사말/서두 제거
             lines = [l.strip() for l in cleaned.split('\n') if l.strip()]
-            filtered = []
-            for line in lines:
-                if any(skip in line for skip in ['안녕하세요', '안녕!', '살펴볼게요', '함께 살펴']):
-                    continue
-                filtered.append(line)
+            filtered = [
+                line for line in lines
+                if not any(skip in line for skip in ['안녕하세요', '안녕!', '살펴볼게요', '함께 살펴'])
+            ]
             interpretation = "\n".join(filtered) if filtered else cleaned
 
         if not interpretation:
-            per = fundamental.get('per', 0)
-            if per and per > 25:
+            # fallback: 데이터 유무 기반
+            if per is None and pbr is None and roe is None and eps is None:
+                interpretation = "이 종목은 밸류에이션 지표가 제공되지 않아 해석이 어려워요. ETN/ETF 거나 재무 데이터가 충분치 않은 신규 종목일 수 있어요."
+            elif per and per < 0:
+                interpretation = "현재 적자 상태로 PER 이 음수에요. 실적 흑자 전환 여부를 함께 살펴보세요."
+            elif per and per > 25:
                 interpretation = "현재 주가는 다소 높은 수준으로 평가되고 있어요. 시장의 성장 기대감이 반영된 것으로 보여요."
             elif per and per < 10:
                 interpretation = "현재 주가는 상대적으로 저평가 구간으로 보여요. 실적 대비 합리적인 수준이에요."
             else:
                 interpretation = "현재 주가는 업종 평균 수준으로 해석돼요."
 
+        # 응답에 None 그대로 (프론트에서 N/A 표시), 음수는 유지.
         return {
-            "per": fundamental.get("per", 0),
-            "pbr": fundamental.get("pbr", 0),
-            "roe": fundamental.get("roe", 0),
-            "eps": fundamental.get("eps", 0),
+            "per": per,
+            "pbr": pbr,
+            "roe": roe,
+            "eps": eps,
             "interpretation": interpretation,
         }
 
@@ -602,9 +623,11 @@ RSI: {rsi_info.get('value', 'N/A')} / 추세: {trend.get('description', 'N/A') i
                 "return_1m": returns.get("1m"),
                 "return_3m": returns.get("3m"),
                 "return_1y": returns.get("1y"),
-                "per": fundamental.get("per", 0),
-                "pbr": fundamental.get("pbr", 0),
-                "roe": fundamental.get("roe", 0),
+                # 0 은 "데이터 없음(N/A)" 으로 정규화. 음수(적자 PER 등)는 유지.
+                # Python: -180 or None == -180, 0 or None == None
+                "per": fundamental.get("per") or None,
+                "pbr": fundamental.get("pbr") or None,
+                "roe": fundamental.get("roe") or None,
                 "rsi": rsi_desc,
             },
             "sections": {
