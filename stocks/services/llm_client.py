@@ -130,19 +130,29 @@ def _try_openai(prompt: str, system: str, temperature: float, max_tokens: int) -
     }
     if not is_gpt5:
         kwargs["temperature"] = temperature
+    else:
+        # gpt-5 시리즈: 종목 리포트는 분석/요약 task 라 high reasoning 불필요.
+        # "low" 로 thinking 시간 단축 → 응답 30~50% 빠름. 퀄리티 영향 미미.
+        kwargs["reasoning_effort"] = "low"
 
-    # SDK 버전에 따라 max_completion_tokens / max_tokens 어느 쪽이 맞는지 자동 폴백
+    # SDK 버전에 따라 max_completion_tokens / max_tokens 어느 쪽이 맞는지 자동 폴백.
+    # 또 reasoning_effort 를 지원 안 하는 SDK 일 수도 있어 그 경우 빼고 재시도.
+    last_error = None
     for token_key in ("max_completion_tokens", "max_tokens"):
-        try:
-            resp = client.chat.completions.create(**kwargs, **{token_key: max_tokens})
-            text = (resp.choices[0].message.content or "").strip()
-            return text or None
-        except TypeError:
-            # 이 파라미터 미지원 SDK → 다른 키로 재시도
-            continue
-        except Exception as e:
-            logger.error("[LLM-OPENAI-ERROR] %s: %s", type(e).__name__, e)
-            return None
+        for try_kwargs in (kwargs, {k: v for k, v in kwargs.items() if k != "reasoning_effort"}):
+            try:
+                resp = client.chat.completions.create(**try_kwargs, **{token_key: max_tokens})
+                text = (resp.choices[0].message.content or "").strip()
+                return text or None
+            except TypeError as e:
+                # 파라미터 미지원 → 다음 조합 시도
+                last_error = e
+                continue
+            except Exception as e:
+                logger.error("[LLM-OPENAI-ERROR] %s: %s", type(e).__name__, e)
+                return None
+    if last_error is not None:
+        logger.error("[LLM-OPENAI-ERROR] All parameter combinations failed: %s", last_error)
     return None
 
 
