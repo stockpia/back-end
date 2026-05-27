@@ -14,7 +14,9 @@ from .services.stock_averaging_data import StockAveragingDataProvider
 from .services.web_stock_report import WebStockReport
 from .services.web_detail_report import WebDetailReport
 from .services.web_order import WebOrder
-from .models import User, KisAccount
+from .models import User, KisAccount, TelegramLink, LinkToken
+from datetime import timedelta
+from django.utils import timezone
 
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -1033,3 +1035,106 @@ class CancelOrderView(APIView):
             return Response(result)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ─── Telegram 연동 (MATE 비서) ───────────────────────────
+
+class TelegramConnectView(APIView):
+    """
+    POST /api/web/users/telegram/connect
+    Web 마이페이지에서 호출. 1회용 LinkToken 발급 → Deep Link 응답.
+
+    Request:
+        { "user_id": "<uuid>" }
+    Response 200:
+        {
+            "deep_link": "https://t.me/<bot_username>?start=<token>",
+            "token": "<token>",
+            "expires_at": "2026-05-27T08:50:00Z"
+        }
+    """
+
+    TOKEN_TTL_MINUTES = 10
+
+    def post(self, request):
+        user_id = (request.data.get("user_id") or "").strip()
+        if not user_id:
+            return Response({"error": "user_id 가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "").strip()
+        if not bot_username:
+            return Response(
+                {"error": "서버에 TELEGRAM_BOT_USERNAME 이 설정되지 않았습니다."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        token_obj = LinkToken.objects.create(
+            user=user,
+            expires_at=timezone.now() + timedelta(minutes=self.TOKEN_TTL_MINUTES),
+        )
+
+        return Response(
+            {
+                "deep_link": f"https://t.me/{bot_username}?start={token_obj.token}",
+                "token": token_obj.token,
+                "expires_at": token_obj.expires_at.isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class TelegramStatusView(APIView):
+    """
+    GET /api/web/users/telegram/status?user_id=<uuid>
+    """
+
+    def get(self, request):
+        user_id = (request.query_params.get("user_id") or "").strip()
+        if not user_id:
+            return Response({"error": "user_id 가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        link = TelegramLink.objects.filter(user=user).first()
+        if link is None:
+            return Response({"linked": False}, status=status.HTTP_200_OK)
+
+        return Response(
+            {
+                "linked": True,
+                "telegram_username": link.telegram_username,
+                "linked_at": link.linked_at.isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class TelegramUnlinkView(APIView):
+    """
+    DELETE /api/web/users/telegram/unlink
+    Body: { "user_id": "<uuid>" }
+    """
+
+    def delete(self, request):
+        user_id = (request.data.get("user_id") or "").strip()
+        if not user_id:
+            return Response({"error": "user_id 가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        deleted, _ = TelegramLink.objects.filter(user=user).delete()
+        return Response(
+            {"unlinked": bool(deleted)},
+            status=status.HTTP_200_OK,
+        )

@@ -9,6 +9,7 @@ from .views import (
     UserSignUpView, UserSignInView, KisAccountConnectView, UserDetailView, # UserDetailView 추가
     OrderBookView, AccountBalanceView, AccountHoldingsView,
     OrderView, PendingOrdersView, CancelOrderView,
+    TelegramConnectView, TelegramStatusView, TelegramUnlinkView,
 )
 
 urlpatterns = [
@@ -17,6 +18,11 @@ urlpatterns = [
     path('users/signin', UserSignInView.as_view(), name='user-signin'),
     path('users/<uuid:user_id>/', UserDetailView.as_view(), name='user-detail'),
     path('kis/connect', KisAccountConnectView.as_view(), name='kis-connect'),
+
+    # MATE 텔레그램 비서 연동
+    path('users/telegram/connect', TelegramConnectView.as_view(), name='telegram-connect'),
+    path('users/telegram/status', TelegramStatusView.as_view(), name='telegram-status'),
+    path('users/telegram/unlink', TelegramUnlinkView.as_view(), name='telegram-unlink'),
 
     # web01-1 종목 차트 API (/api/web/stocks/{symbol}/chart)
     path('stocks/<str:symbol>/chart', StockChartView.as_view()),
