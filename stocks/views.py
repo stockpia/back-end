@@ -22,16 +22,42 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
 
+def _looks_like_security_code(s: str) -> bool:
+    """
+    이미 형태가 종목코드/증권코드처럼 보이면 외부 검색 skip.
+    - 일반 주식: 6자리 숫자 (예: 005930)
+    - ETN/ETF 변종: 0/Q 로 시작, 영문 1자(X 등) 포함 가능 (예: 0197X0, Q760027)
+    - ELW 등: 6~8자, 영숫자 혼합
+    네이버 자동완성 + pykrx 가 이 변종 코드를 대부분 인식 못하므로,
+    형태로 판별되면 그대로 반환해서 한투 API 가 직접 처리하게 둠.
+    """
+    if not s:
+        return False
+    if s.isdigit() and len(s) == 6:           # 일반 주식
+        return True
+    if 6 <= len(s) <= 8 and s.isalnum() and any(c.isdigit() for c in s):
+        # 영숫자 혼합 6~8자 — ETN/ETF/ELW 변종 코드 패턴
+        # 첫 글자가 0 또는 Q 이거나 X 가 포함되면 거의 확실히 종목 코드
+        if s[0] in "0Q" or "X" in s.upper():
+            return True
+    return False
+
+
 def resolve_symbol(symbol_or_name: str) -> str:
     """
     이름(예: 삼성전자)이 들어오면 종목코드(005930)로 변환,
     종목코드가 들어오면 그대로 반환.
+    ETN/ETF 변종 코드(0197X0 등)도 외부 검색 우회하여 그대로 반환.
     """
     if symbol_or_name.isdigit():
         return symbol_or_name
-    
+
     if symbol_or_name.upper() == "ALL":
         return "ALL"
+
+    # ETN/ETF 변종 코드는 네이버/pykrx 가 인식 못하므로 외부 검색 우회
+    if _looks_like_security_code(symbol_or_name.upper()):
+        return symbol_or_name.upper()
 
     target = symbol_or_name.replace(" ", "").upper()
     debug_logs = []
@@ -168,7 +194,7 @@ class StockChartView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response(
                 {"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."},
                 status=status.HTTP_404_NOT_FOUND
@@ -256,7 +282,7 @@ class BaseStockInfoView(APIView):
     # 부모 클래스(공통 기능)
     # noinspection PyMethodMayBeStatic
     def get_company_name(self, symbol):
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return symbol
             
         try:
@@ -289,7 +315,7 @@ class StockNewsView(BaseStockInfoView):
         if symbol.startswith("ERROR:"):
             return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         cache_key = f"news_{symbol}_{page}"
@@ -338,7 +364,7 @@ class StockCommunityView(BaseStockInfoView):
         if symbol.startswith("ERROR:"):
             return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -375,7 +401,7 @@ class StockCommunityLatestView(BaseStockInfoView):
         if symbol.startswith("ERROR:"):
             return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -411,7 +437,7 @@ class AveragingHoldingView(APIView):
         if symbol.startswith("ERROR:"):
             return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         cache_key = f"averaging_holding_{symbol}"
@@ -451,7 +477,7 @@ class AveragingCalculateQuantityView(APIView):
         if symbol.startswith("ERROR:"):
             return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -494,7 +520,7 @@ class AveragingCalculateAmountView(APIView):
         if symbol.startswith("ERROR:"):
             return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -541,7 +567,7 @@ class AveragingSaveView(APIView):
         if symbol.startswith("ERROR:"):
             return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": "INVALID_INPUT", "message": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         provider = StockAveragingDataProvider()
@@ -570,7 +596,7 @@ class AveragingHistoryView(APIView):
         if symbol.startswith("ERROR:"):
             return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         # 쿼리 파라미터에서 limit 추출 (기본 10개)
@@ -665,7 +691,7 @@ class StockReportView(APIView):
             if symbol.startswith("ERROR:"):
                 return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-            if not symbol.isdigit():
+            if not _looks_like_security_code(symbol):
                 return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
             web_report = WebStockReport()
@@ -867,7 +893,7 @@ class StockFavoriteToggleView(APIView):
         if symbol.startswith("ERROR:"):
             return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not symbol.isdigit():
+        if not _looks_like_security_code(symbol):
             return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
         user_id = request.data.get('user_id', 'default_user')
