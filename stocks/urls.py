@@ -10,6 +10,7 @@ from .views import (
     OrderBookView, AccountBalanceView, AccountHoldingsView,
     OrderView, PendingOrdersView, CancelOrderView,
     TelegramConnectView, TelegramStatusView, TelegramUnlinkView,
+    UserNotifySettingsView,
 )
 
 urlpatterns = [
@@ -23,6 +24,7 @@ urlpatterns = [
     path('users/telegram/connect', TelegramConnectView.as_view(), name='telegram-connect'),
     path('users/telegram/status', TelegramStatusView.as_view(), name='telegram-status'),
     path('users/telegram/unlink', TelegramUnlinkView.as_view(), name='telegram-unlink'),
+    path('users/notify-settings', UserNotifySettingsView.as_view(), name='user-notify-settings'),
 
     # web01-1 종목 차트 API (/api/web/stocks/{symbol}/chart)
     path('stocks/<str:symbol>/chart', StockChartView.as_view()),
