@@ -689,7 +689,9 @@ class StockReportView(APIView):
             if "error" in result:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
-            cache.set(cache_key, result, 1800)
+            # 리포트는 LLM 호출 비용·시간이 크고 일 단위 데이터라
+            # 4시간 캐시 (재방문 시 즉시 응답).
+            cache.set(cache_key, result, 14400)
             return Response(result)
 
         # noinspection PyBroadException

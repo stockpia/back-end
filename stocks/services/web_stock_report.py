@@ -101,6 +101,27 @@ class WebStockReport:
         from .llm_client import generate
         return generate(prompt, temperature=0.3, max_output_tokens=4096)
 
+    def _parse_opinion_response(self, raw: str) -> Dict:
+        """
+        투자의견 LLM 응답에서 JSON 추출 (LLM 이 코드 펜스/머리말을 붙여도 회수).
+        실패 시 빈 dict 반환.
+        """
+        import json, re
+        if not raw:
+            return {}
+        text = raw.strip()
+        # ```json ... ``` 같은 마크다운 코드 펜스 제거
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        # 가장 바깥쪽 {...} 추출
+        m = re.search(r"\{[\s\S]*\}", text)
+        if not m:
+            return {}
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return {}
+
     def _clean_markdown(self, text: str) -> str:
         """마크다운 서식 제거"""
         import re
@@ -457,74 +478,42 @@ PER: {fundamental.get('per', 'N/A')} / ROE: {fundamental.get('roe', 'N/A')}%
 RSI: {rsi_info.get('value', 'N/A')} / 추세: {trend.get('description', 'N/A') if isinstance(trend, dict) else trend}
 1년 수익률: {returns.get('1y', 'N/A')}%{dart_line}
 
-웹 상세 리포트용으로 종합 투자 의견을 작성해주세요:
+위 데이터로 웹 종합 투자 의견을 다음 JSON 형식으로만 응답하세요.
+다른 텍스트(인사말/설명/마크다운 코드 펜스) 절대 포함 금지. 순수 JSON 만:
 
-형식:
-[장점]
-• 장점1
-• 장점2
-
-[유의사항]
-• 유의1
-• 유의2
-
-[체크포인트]
-• 체크1
-• 체크2
-
-[관점]
-단기: (한 줄 의견)
-중기: (한 줄 의견)
-장기: (한 줄 의견)
+{{
+  "pros": ["장점 한 줄", "장점 한 줄"],
+  "cons": ["유의 한 줄", "유의 한 줄"],
+  "checkpoints": ["체크 한 줄", "체크 한 줄"],
+  "perspective": {{
+    "short_term": "단기 관점 한 줄",
+    "mid_term":   "중기 관점 한 줄",
+    "long_term":  "장기 관점 한 줄"
+  }}
+}}
 
 조건:
 - "~에요", "~있어요" 친근한 말투
 - 매수/매도 추천 금지, 정보 제공만
-- 인사말 없이 바로 작성
-- 위에 제공된 데이터만 언급하세요. 데이터에 없는 지표는 언급하지 마세요."""
+- 위에 제공된 데이터만 언급. 없는 지표는 언급 금지.
+- pros/cons/checkpoints 는 각각 2~4개.
+- 모든 문자열은 한국어, 1문장 (이모지·마크다운 X)."""
 
         result = self._generate_llm_text(prompt)
 
-        pros = []
-        cons = []
-        checkpoints = []
+        pros, cons, checkpoints = [], [], []
         perspective = {"short_term": "", "mid_term": "", "long_term": ""}
 
         if result:
-            # 장점 파싱
-            if '[장점]' in result and '[유의사항]' in result:
-                pros_text = result.split('[장점]')[1].split('[유의사항]')[0]
-                pros = self._parse_bullet_lines(pros_text)[:4]
-
-            # 유의사항 파싱
-            if '[유의사항]' in result and '[체크포인트]' in result:
-                cons_text = result.split('[유의사항]')[1].split('[체크포인트]')[0]
-                cons = self._parse_bullet_lines(cons_text)[:4]
-
-            # 체크포인트 파싱
-            if '[체크포인트]' in result and '[관점]' in result:
-                check_text = result.split('[체크포인트]')[1].split('[관점]')[0]
-                checkpoints = self._parse_bullet_lines(check_text)[:4]
-
-            # 관점 파싱 (다양한 형식 대응)
-            if '[관점]' in result:
-                import re
-                perspective_text = result.split('[관점]')[1]
-                for line in perspective_text.strip().split('\n'):
-                    line = self._clean_markdown(line.strip())
-                    # bullet 제거
-                    line = re.sub(r'^[\•\*\-\·]\s*', '', line).strip()
-                    if not line:
-                        continue
-                    if '단기' in line:
-                        val = re.split(r'단기[^:：]*[:：]\s*', line, maxsplit=1)
-                        perspective["short_term"] = val[-1].strip() if len(val) > 1 else line
-                    elif '중기' in line:
-                        val = re.split(r'중기[^:：]*[:：]\s*', line, maxsplit=1)
-                        perspective["mid_term"] = val[-1].strip() if len(val) > 1 else line
-                    elif '장기' in line:
-                        val = re.split(r'장기[^:：]*[:：]\s*', line, maxsplit=1)
-                        perspective["long_term"] = val[-1].strip() if len(val) > 1 else line
+            parsed = self._parse_opinion_response(result)
+            pros = parsed.get("pros") or []
+            cons = parsed.get("cons") or []
+            checkpoints = parsed.get("checkpoints") or []
+            p = parsed.get("perspective") or {}
+            if isinstance(p, dict):
+                perspective["short_term"] = (p.get("short_term") or "").strip()
+                perspective["mid_term"]   = (p.get("mid_term")   or "").strip()
+                perspective["long_term"]  = (p.get("long_term")  or "").strip()
 
         # fallback
         if not pros:
@@ -579,12 +568,21 @@ RSI: {rsi_info.get('value', 'N/A')} / 추세: {trend.get('description', 'N/A') i
         # 관심 종목 여부
         is_favorite = self._is_favorite(user_id, symbol)
 
-        # 5개 섹션 생성
-        investment_summary = self._build_investment_summary(data, company_name)
-        price_trend = self._build_price_trend(data, company_name)
-        financial_analysis = self._build_financial_analysis(data, company_name)
-        valuation = self._build_valuation(data, company_name)
-        investment_opinion = self._build_investment_opinion(data, company_name)
+        # 5개 섹션을 ThreadPool 로 병렬 생성 (직렬 5-15초 → 가장 느린 1개 시간)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            futures = {
+                "investment_summary": ex.submit(self._build_investment_summary, data, company_name),
+                "price_trend":        ex.submit(self._build_price_trend,        data, company_name),
+                "financial_analysis": ex.submit(self._build_financial_analysis, data, company_name),
+                "valuation":          ex.submit(self._build_valuation,          data, company_name),
+                "investment_opinion": ex.submit(self._build_investment_opinion, data, company_name),
+            }
+            investment_summary = futures["investment_summary"].result()
+            price_trend        = futures["price_trend"].result()
+            financial_analysis = futures["financial_analysis"].result()
+            valuation          = futures["valuation"].result()
+            investment_opinion = futures["investment_opinion"].result()
 
         return {
             "symbol": symbol,
