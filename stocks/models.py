@@ -9,9 +9,15 @@ from .services.crypto_utils import encrypt, decrypt
 class User(models.Model):
     """
     사용자 정보 (users)
+
+    스키마 노트:
+    - login_id: 로그인 식별자 (사용자가 직접 정함, unique). 기존엔 phone 으로 로그인했으나
+      'phone' 은 부가 정보로 변경 (capstone 단계엔 굳이 검증할 필요 X).
+    - phone: 회원가입 시 입력하는 부가 연락 정보. unique 제약 없음, 빈 값 허용.
     """
     user_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    phone = models.CharField(max_length=20, unique=True, null=False)
+    login_id = models.CharField(max_length=50, unique=True, null=False)
+    phone = models.CharField(max_length=20, null=True, blank=True)
     name = models.CharField(max_length=50, null=False)
     birthdate = models.CharField(max_length=8, null=False)  # YYYYMMDD
     password_hash = models.CharField(max_length=128, null=False)
