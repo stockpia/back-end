@@ -3,8 +3,9 @@ Description=Stockpia MATE morning briefing — 매일 08:30 KST 발송
 Requires=stockpia-briefing@morning.service
 
 [Timer]
-# 시스템 timezone 이 Asia/Seoul 인 환경에서 08:30 매일.
-OnCalendar=*-*-* 08:30:00
+# OnCalendar 마지막에 timezone 명시 — systemd 217+ 기능. 시스템 TZ 가 UTC 든
+# KST 든 상관없이 항상 KST 기준으로 발사.
+OnCalendar=*-*-* 08:30:00 Asia/Seoul
 Persistent=true
 Unit=stockpia-briefing@morning.service
 

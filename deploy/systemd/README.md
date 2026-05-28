@@ -34,7 +34,7 @@ sudo systemctl disable --now stockpia-briefing@evening.timer
 
 ## 주의
 
-- 시스템 timezone 이 `Asia/Seoul` 이어야 OnCalendar 가 KST 로 동작 (EC2 는 이미 KST).
+- `OnCalendar` 끝에 `Asia/Seoul` 명시 → 시스템 timezone 이 UTC 든 KST 든 상관없이 항상 KST 기준 발사. (systemd 217+ 필요)
 - `Persistent=true` 라 EC2 가 꺼져 있던 동안 놓친 schedule 은 부팅 시 즉시 1회 catch-up 발사.
   반복 catch-up 은 없음.
 - `EnvironmentFile=/home/ubuntu/stockpia/.env` 에 `TELEGRAM_BOT_TOKEN` / `OPENAI_API_KEY` 필요.
