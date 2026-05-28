@@ -1,0 +1,12 @@
+[Unit]
+Description=Stockpia MATE morning briefing — 매일 08:30 KST 발송
+Requires=stockpia-briefing@morning.service
+
+[Timer]
+# 시스템 timezone 이 Asia/Seoul 인 환경에서 08:30 매일.
+OnCalendar=*-*-* 08:30:00
+Persistent=true
+Unit=stockpia-briefing@morning.service
+
+[Install]
+WantedBy=timers.target
