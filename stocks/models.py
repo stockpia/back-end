@@ -139,3 +139,34 @@ class NotificationLog(models.Model):
 
     def __str__(self):
         return f"Notification for {self.user.name} at {self.sent_at}"
+
+
+class AgentConversation(models.Model):
+    """
+    MATE Agent 멀티턴 대화 이력 (agent_conversations).
+
+    ReplyAgent 가 다음 호출 시 최근 N개 메시지를 컨텍스트로 로드. role 은
+    LangChain 메시지 타입과 매핑:
+      - 'user'      → HumanMessage (사용자 입력)
+      - 'assistant' → AIMessage    (LLM 응답, tool_calls 포함 가능)
+      - 'tool'      → ToolMessage  (도구 실행 결과)
+      - 'system'    → SystemMessage (필요 시)
+
+    tool_calls JSON 예시:
+      [{"id": "call_abc", "name": "get_current_price", "args": {"symbol": "005930"}}]
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    role = models.CharField(max_length=10, null=False)  # user|assistant|tool|system
+    content = models.TextField()
+    tool_calls = models.JSONField(null=True, blank=True)
+    tool_call_id = models.CharField(max_length=64, null=True, blank=True)  # role='tool' 일 때 필수
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'created_at'], name='agentconv_user_at_idx'),
+        ]
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.role} @ {self.created_at:%Y-%m-%d %H:%M} ({self.user.name})"

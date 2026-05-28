@@ -22,11 +22,14 @@ django.setup()
 
 from asgiref.sync import sync_to_async  # noqa: E402
 from telegram import Update  # noqa: E402
+from telegram.constants import ChatAction  # noqa: E402
 from telegram.error import TelegramError  # noqa: E402
 from telegram.ext import (  # noqa: E402
     Application,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from stocks.models import LinkToken, TelegramLink  # noqa: E402
@@ -89,6 +92,37 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(chat_id=chat.id, text="pong")
 
 
+# ─── 일반 텍스트 메시지 → ReplyAgent ──────────────────────
+
+async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """명령어가 아닌 자유 텍스트 메시지를 받으면 ReplyAgent 로 위임."""
+    chat = update.effective_chat
+    msg = update.effective_message
+    if chat is None or msg is None or not msg.text:
+        return
+
+    user_id = await _resolve_user_id_by_chat(chat.id)
+    if not user_id:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=(
+                "먼저 웹 마이페이지에서 '텔레그램 알림 받기' 를 눌러 계정을 연결해 주세요. "
+                "연결 후엔 종목 질문 등에 답해드릴 수 있어요."
+            ),
+        )
+        return
+
+    # 사용자 응답성 향상: 타이핑 인디케이터
+    try:
+        await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
+    except TelegramError:
+        pass
+
+    reply = await _invoke_reply_agent(user_id, msg.text)
+    # 텔레그램 메시지 길이 제한 4096 — 안전하게 짧게 자름
+    await context.bot.send_message(chat_id=chat.id, text=reply[:3900])
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """미처리 예외 캐치 → 로그 + 사용자에게 안내."""
     logger.exception("Unhandled error while processing update: %s", context.error)
@@ -106,6 +140,27 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ─── DB 작업 (sync ORM 을 async wrapper 로) ───────────────
+
+@sync_to_async
+def _resolve_user_id_by_chat(chat_id: int) -> str | None:
+    """chat_id → 연결된 user.user_id (UUID str). 미연결 시 None."""
+    link = TelegramLink.objects.select_related("user").filter(chat_id=chat_id).first()
+    if not link:
+        return None
+    return str(link.user.user_id)
+
+
+@sync_to_async
+def _invoke_reply_agent(user_id: str, message: str) -> str:
+    """ReplyAgent 호출은 동기 ORM 사용 — sync_to_async 로 래핑."""
+    # 지연 import: 봇 워커 부팅 시점에 LangChain 무거운 import 발생 방지
+    from stocks.agents.reply_agent import ReplyAgent
+    try:
+        return ReplyAgent().handle(user_id, message)
+    except Exception as e:
+        logger.exception("ReplyAgent.handle failed: %s", e)
+        return "분석 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요."
+
 
 @sync_to_async
 def _try_link(token_str: str, chat_id: int, telegram_username: str | None) -> str:
@@ -162,6 +217,8 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("ping", cmd_ping))
+    # 명령어가 아닌 일반 텍스트 → ReplyAgent
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_error_handler(on_error)
 
     # MVP: long-polling. 운영 webhook 전환은 추후.
