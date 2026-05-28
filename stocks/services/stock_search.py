@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
+from functools import lru_cache
 from typing import Dict, List
 
 import requests
@@ -113,3 +114,18 @@ def _fetch_name_by_code(code: str) -> str:
     except Exception as e:
         logger.warning("[SEARCH-CODE-LOOKUP] %s failed: %s", code, e)
         return ""
+
+
+@lru_cache(maxsize=4096)
+def lookup_company_name(ticker: str) -> str:
+    """
+    종목코드 → 회사명 단일 lookup (lru cache 4096).
+
+    이전 구현은 pykrx.get_market_ticker_name 을 사용했으나 KRX scraping
+    단절로 항상 빈값 반환 → 네이버 종목 페이지 title 파싱으로 대체.
+    실패 시 ticker 그대로 반환 (호출자 컨벤션 유지).
+    """
+    if not ticker:
+        return ticker
+    name = _fetch_name_by_code(ticker)
+    return name or ticker

@@ -14,7 +14,7 @@ from .services.stock_averaging_data import StockAveragingDataProvider
 from .services.web_stock_report import WebStockReport
 from .services.web_detail_report import WebDetailReport
 from .services.web_order import WebOrder
-from .services.stock_search import search_stocks
+from .services.stock_search import search_stocks, lookup_company_name
 from .models import User, KisAccount, TelegramLink, LinkToken
 from datetime import timedelta
 from django.utils import timezone
@@ -46,131 +46,37 @@ def _looks_like_security_code(s: str) -> bool:
 
 def resolve_symbol(symbol_or_name: str) -> str:
     """
-    이름(예: 삼성전자)이 들어오면 종목코드(005930)로 변환,
-    종목코드가 들어오면 그대로 반환.
-    ETN/ETF 변종 코드(0197X0 등)도 외부 검색 우회하여 그대로 반환.
+    이름(예: 삼성전자) → 종목코드(005930), 종목코드는 그대로.
+    ETN/ETF 변종(0197X0 등)도 그대로 반환.
+
+    검색은 네이버 금융 검색 (stock_search.search_stocks) 단일 경로로 위임.
+    이전 fallback: ac.finance.naver.com 자동완성 (NXDOMAIN) + pykrx 전종목 스캔
+    (KRX 스크래핑 단절) — 둘 다 실패가 기본값이라 제거.
     """
-    if symbol_or_name.isdigit():
-        return symbol_or_name
-
-    if symbol_or_name.upper() == "ALL":
+    s = symbol_or_name
+    if s.isdigit():
+        return s
+    if s.upper() == "ALL":
         return "ALL"
+    if _looks_like_security_code(s.upper()):
+        return s.upper()
 
-    # ETN/ETF 변종 코드는 네이버/pykrx 가 인식 못하므로 외부 검색 우회
-    if _looks_like_security_code(symbol_or_name.upper()):
-        return symbol_or_name.upper()
-
-    target = symbol_or_name.replace(" ", "").upper()
-    debug_logs = []
-
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://finance.naver.com/'
-    }
-
-    # 1. 네이버 금융 자동완성 API 활용
-    url = "https://ac.finance.naver.com/ac"
-    params = {
-        'q': symbol_or_name,
-        'q_enc': 'utf-8',
-        'st': '111',
-        'r_format': 'json',
-        'r_enc': 'utf-8'
-    }
-    
+    target = s.replace(" ", "").upper()
     try:
-        res = requests.get(url, params=params, headers=headers, timeout=5)
-        debug_logs.append(f"AC Status: {res.status_code}")
-        if res.status_code == 200:
-            data = res.json()
-            items = data.get('items', [])
-            
-            # 1순위: 정확히 일치하는 종목 찾기
-            for category in items:
-                for item in category:
-                    if len(item) >= 2 and item[1].isdigit():
-                        if item[0] == symbol_or_name:
-                            return str(item[1])
-                            
-            # 2순위: 첫 번째 종목 반환
-            for category in items:
-                for item in category:
-                    if len(item) >= 2 and item[1].isdigit():
-                        return str(item[1])
-            debug_logs.append("AC No items found")
+        results = search_stocks(s, limit=20)
     except Exception as e:
-        debug_logs.append(f"AC Error: {str(e)}")
+        return f"ERROR: search_stocks raised {type(e).__name__}: {e}"
 
-    # 2. 네이버 금융 검색 스크래핑
-    try:
-        from bs4 import BeautifulSoup
-        encoded_query = urllib.parse.quote(symbol_or_name.encode('euc-kr'))
-        search_url = f"https://finance.naver.com/search/search.naver?query={encoded_query}"
-        
-        res = requests.get(search_url, headers=headers, timeout=5)
-        debug_logs.append(f"Search Status: {res.status_code}")
-        
-        # 검색어가 완벽히 일치하여 바로 종목 페이지로 리다이렉트 된 경우
-        if 'code=' in res.url:
-            return res.url.split('code=')[1].split('&')[0]
-            
-        # 검색 결과 리스트 페이지로 간 경우 첫 번째 결과의 href 추출
-        # utf-8 또는 euc-kr 중 하나로 렌더링되므로, 자동 감지된 인코딩 사용
-        soup = BeautifulSoup(res.content, 'html.parser', from_encoding='euc-kr')
-        
-        # 주식 종목 검색 결과 테이블 파싱
-        # td.tit 클래스를 가진 a 태그 찾기
-        a_tags = soup.select("td.tit a")
-        if a_tags:
-            for a_tag in a_tags:
-                href = a_tag.get('href', '')
-                if 'code=' in href:
-                    # 일치하는 이름이 있는지 확인 (카카오, 두산 등 짧은 이름 매칭)
-                    name = a_tag.text.strip().replace(" ", "").upper()
-                    if name == target or target in name:
-                        return href.split('code=')[1].split('&')[0]
-            
-            # 정확히 일치하는 걸 못찾았으면 첫번째 결과 반환
-            href = a_tags[0].get('href', '')
-            if 'code=' in href:
-                return href.split('code=')[1].split('&')[0]
-        debug_logs.append("Search No tags found")
-    except Exception as e:
-        debug_logs.append(f"Search Error: {str(e)}")
+    if not results:
+        return f"ERROR: no match for '{s}'"
 
-    # 3. pykrx 라이브러리를 활용한 Fallback
-    try:
-        from pykrx import stock as pystock
-        from datetime import datetime
-        from dateutil.relativedelta import relativedelta
-        
-        today = datetime.now()
-        found_date = False
-        for i in range(10):
-            d = (today - relativedelta(days=i)).strftime("%Y%m%d")
-            kospi_tickers = pystock.get_market_ticker_list(d, market="KOSPI")
-            if kospi_tickers:
-                found_date = True
-                kosdaq_tickers = pystock.get_market_ticker_list(d, market="KOSDAQ")
-                all_tickers = kospi_tickers + kosdaq_tickers
-                
-                for t in all_tickers:
-                    name = pystock.get_market_ticker_name(t)
-                    if name and name.replace(" ", "").upper() == target:
-                        return str(t)
-                        
-                for t in all_tickers:
-                    name = pystock.get_market_ticker_name(t)
-                    if name and target in name.replace(" ", "").upper():
-                        return str(t)
-                break
-        if not found_date:
-            debug_logs.append("pykrx No trading dates found")
-    except Exception as e:
-        debug_logs.append(f"pykrx Error: {str(e)}")
+    # 정확 일치 우선 (공백 무시 + 대문자 비교)
+    for r in results:
+        if r["name"].replace(" ", "").upper() == target:
+            return r["ticker"]
 
-    # 변환 실패 시 디버그 로그 반환
-    return f"ERROR: {' | '.join(debug_logs)}"
+    # 부분 일치 첫 번째
+    return results[0]["ticker"]
 
 
 class StockChartView(APIView):

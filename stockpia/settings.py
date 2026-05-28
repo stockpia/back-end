@@ -26,11 +26,12 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-a-default-secret-key-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
-# 배포 환경(Render, AWS) 및 로컬 개발 환경을 위한 호스트 설정
-ALLOWED_HOSTS = [
-    '.amazonaws.com', 'stockpia-api.onrender.com', # Render 배포 도메인
-    '127.0.0.1', 'localhost'
-]
+# 배포 환경(AWS EC2 + sslip.io 도메인) 및 로컬 개발 환경 호스트 설정.
+# 운영 도메인은 .env 의 ALLOWED_HOSTS 에서 콤마 분리 형식으로 주입.
+ALLOWED_HOSTS = os.environ.get(
+    'ALLOWED_HOSTS',
+    '.amazonaws.com,127.0.0.1,localhost'
+).split(',')
 
 
 # Application definition
@@ -63,16 +64,23 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS 설정: 모든 출처에서의 요청을 허용 (개발 시 편의)
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS — 운영 기본은 화이트리스트, 개발 시 CORS_ALLOW_ALL=true 로 토글
+CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL', 'False').lower() == 'true'
 
-# 특정 출처 (프로덕션 환경에서는 CORS_ALLOW_ALL_ORIGINS 대신 사용 권장)
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://stockpia-api.onrender.com",
-    "http://localhost:5173", # WebSocket 테스트를 위해 추가
-]
+CORS_ALLOWED_ORIGINS = os.environ.get(
+    'CORS_ALLOWED_ORIGINS',
+    'http://localhost:3000,http://localhost:5173'
+).split(',')
+CORS_ALLOW_CREDENTIALS = True
+
+# CSRF (Django 4+ 필수 — 크로스 오리진 POST 시 차단 방지)
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    'CSRF_TRUSTED_ORIGINS',
+    'http://localhost:3000,http://localhost:5173'
+).split(',')
+
+# Nginx → daphne TLS termination 환경: 프록시가 보낸 X-Forwarded-Proto 신뢰
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 ROOT_URLCONF = 'stockpia.urls'
@@ -131,7 +139,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Seoul'
 
 USE_I18N = True
 
