@@ -13,7 +13,6 @@
 import time
 import pandas as pd
 from datetime import datetime, timedelta
-from functools import lru_cache
 from typing import Dict, Optional, List
 
 try:
@@ -21,29 +20,11 @@ try:
 except ImportError:
     fdr = None
 
-try:
-    from pykrx import stock as _pykrx_stock
-except ImportError:
-    _pykrx_stock = None
-
-
-@lru_cache(maxsize=4096)
-def _lookup_company_name(ticker: str) -> str:
-    """
-    종목코드 → 회사명 lookup.
-    한투 inquire-price 응답엔 회사명 필드가 없어 fallback 으로 종목코드가 그대로
-    표시되던 문제 해소용. pykrx 가 가장 빠르고 정확한 한국 종목명 lookup 라이브러리.
-    실패 시 ticker 그대로 반환.
-    """
-    if not ticker or not ticker.isdigit():
-        return ticker
-    if _pykrx_stock is None:
-        return ticker
-    try:
-        name = _pykrx_stock.get_market_ticker_name(ticker)
-        return name or ticker
-    except Exception:
-        return ticker
+# 종목코드 → 회사명 단일 lookup. 한투 inquire-price 응답에 name 필드가 없을 때
+# 종목코드가 그대로 노출되는 문제 회피용.
+# 이전엔 pykrx.get_market_ticker_name 을 사용했으나 KRX scraping 단절로 항상 빈값 →
+# 네이버 종목 페이지 title 파싱(stock_search.lookup_company_name)으로 위임.
+from .stock_search import lookup_company_name as _lookup_company_name
 
 try:
     from .HantuStock import HantuStock
