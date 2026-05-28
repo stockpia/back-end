@@ -14,6 +14,7 @@ from .services.stock_averaging_data import StockAveragingDataProvider
 from .services.web_stock_report import WebStockReport
 from .services.web_detail_report import WebDetailReport
 from .services.web_order import WebOrder
+from .services.stock_search import search_stocks
 from .models import User, KisAccount, TelegramLink, LinkToken
 from datetime import timedelta
 from django.utils import timezone
@@ -248,6 +249,40 @@ class StockListView(APIView):
         # noinspection PyBroadException
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class StockSearchView(APIView):
+    """
+    Web - 종목 검색 API
+    URL: /api/web/stocks/search?q={query}&limit={20}
+
+    네이버 금융 검색을 통해 전체 KOSPI/KOSDAQ 종목 대상 부분 일치 검색.
+    - 한글 부분 입력 ("삼성") → "삼성전자", "삼성SDI", "삼성중공업" 등
+    - 6자리 코드 ("035720") → 해당 종목
+    - 결과는 1시간 캐시 (네이버 페이지 자체가 비교적 안정적).
+    """
+
+    # noinspection PyMethodMayBeStatic
+    def get(self, request):
+        q = (request.query_params.get('q') or request.query_params.get('query') or '').strip()
+        try:
+            limit = int(request.query_params.get('limit', 20))
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(50, limit))
+
+        if not q:
+            return Response({"query": "", "count": 0, "stocks": []})
+
+        cache_key = f"stock_search:{q.lower()}:{limit}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        stocks = search_stocks(q, limit=limit)
+        result = {"query": q, "count": len(stocks), "stocks": stocks}
+        cache.set(cache_key, result, timeout=3600)  # 1h
+        return Response(result)
 
 
 class StockHoldingView(APIView):

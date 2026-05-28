@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-    StockChartView, StockListView, StockHoldingView,
+    StockChartView, StockListView, StockSearchView, StockHoldingView,
     StockNewsView, StockCommunityView, StockCommunityLatestView,
     AveragingHoldingView, AveragingCalculateQuantityView, AveragingCalculateAmountView,
     AveragingSaveView, AveragingHistoryView,
@@ -31,6 +31,10 @@ urlpatterns = [
 
     # web01-2 전체 종목 리스트 API (/api/web/stocks/list)
     path('stocks/list', StockListView.as_view()),
+
+    # web01-2b 종목 검색 API (네이버 금융 기반, 부분 일치)
+    # GET /api/web/stocks/search?q={query}&limit={20}
+    path('stocks/search', StockSearchView.as_view(), name='stock-search'),
 
     # web01-3 보유 종목 리스트 API (/api/web/stocks/holdings)
     path('stocks/holdings', StockHoldingView.as_view()),
