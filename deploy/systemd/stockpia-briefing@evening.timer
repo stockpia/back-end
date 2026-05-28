@@ -3,7 +3,8 @@ Description=Stockpia MATE evening briefing — 매일 17:30 KST 발송
 Requires=stockpia-briefing@evening.service
 
 [Timer]
-OnCalendar=*-*-* 17:30:00
+# OnCalendar 마지막에 timezone 명시 — 시스템 TZ 무관하게 항상 KST 발사
+OnCalendar=*-*-* 17:30:00 Asia/Seoul
 Persistent=true
 Unit=stockpia-briefing@evening.service
 
