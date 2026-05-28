@@ -676,26 +676,37 @@ class UserSignUpView(APIView):
     """
     사용자 회원가입 API
     POST /api/web/users/signup
+
+    필수: login_id, name, birthdate, password
+    선택: phone (부가 정보, unique 아님)
     """
     def post(self, request):
-        phone = request.data.get('phone')
-        name = request.data.get('name')
-        birthdate = request.data.get('birthdate')
-        password = request.data.get('password')
+        login_id = (request.data.get('login_id') or '').strip()
+        name = (request.data.get('name') or '').strip()
+        birthdate = (request.data.get('birthdate') or '').strip()
+        password = request.data.get('password') or ''
+        phone = (request.data.get('phone') or '').strip() or None
 
-        if not all([phone, name, birthdate, password]):
-            return Response({"error": "모든 필수 정보를 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+        if not all([login_id, name, birthdate, password]):
+            return Response(
+                {"error": "필수 정보(login_id, name, birthdate, password)를 모두 입력해주세요."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if User.objects.filter(phone=phone).exists():
-            return Response({"error": "이미 가입된 전화번호입니다."}, status=status.HTTP_400_BAD_REQUEST)
+        if User.objects.filter(login_id=login_id).exists():
+            return Response(
+                {"error": "이미 사용 중인 아이디입니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        user = User(phone=phone, name=name, birthdate=birthdate)
+        user = User(login_id=login_id, name=name, birthdate=birthdate, phone=phone)
         user.set_password(password)
         user.save()
 
         return Response({
             "message": "회원가입이 성공적으로 완료되었습니다.",
-            "user_id": user.user_id
+            "user_id": user.user_id,
+            "login_id": user.login_id,
         }, status=status.HTTP_201_CREATED)
 
 
@@ -703,24 +714,37 @@ class UserSignInView(APIView):
     """
     사용자 로그인 API
     POST /api/web/users/signin
+
+    필수: login_id, password
+    (구버전 호환을 위해 'phone' 필드로 들어와도 login_id 로 시도)
     """
     def post(self, request):
-        phone = request.data.get('phone')
-        password = request.data.get('password')
+        login_id = (
+            request.data.get('login_id')
+            or request.data.get('phone')   # 구버전 클라이언트 호환
+            or ''
+        ).strip()
+        password = request.data.get('password') or ''
 
-        if not all([phone, password]):
-            return Response({"error": "전화번호와 비밀번호를 모두 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+        if not all([login_id, password]):
+            return Response(
+                {"error": "아이디와 비밀번호를 모두 입력해주세요."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
-            user = User.objects.get(phone=phone)
+            user = User.objects.get(login_id=login_id)
             if not user.check_password(password):
-                return Response({"error": "비밀번호가 일치하지 않습니다."}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # 여기서 JWT 토큰 또는 세션 생성 로직 추가 (지금은 user_id만 반환)
+                return Response(
+                    {"error": "비밀번호가 일치하지 않습니다."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             return Response({
                 "message": "로그인에 성공했습니다.",
                 "user_id": user.user_id,
-                "name": user.name
+                "login_id": user.login_id,
+                "name": user.name,
             }, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
@@ -728,33 +752,51 @@ class UserSignInView(APIView):
 
 class KisAccountConnectView(APIView):
     """
-    KIS 계좌 연결 API (로그인 후 사용)
+    KIS 계좌 연결 / 해제 API.
+
     POST /api/web/kis/connect
+      body: user_id (필수), app_key, app_secret, account_number, env(default vps)
+      - app_key/app_secret/account_number 가 모두 제공되면 사용자 키로 연결
+      - 셋 중 하나라도 비어 있으면 .env 의 시스템 키로 fallback (관리자/데모용)
+
+    DELETE /api/web/kis/connect
+      body: user_id (필수)
+      - 해당 사용자의 KisAccount 삭제 (연동 해제)
     """
 
     def post(self, request):
-        user_id = request.data.get('user_id') # 실제로는 인증된 사용자 정보에서 가져와야 함
+        user_id = request.data.get('user_id')
         if not user_id:
             return Response({"error": "사용자 정보가 필요합니다."}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         try:
             user = User.objects.get(user_id=user_id)
         except User.DoesNotExist:
             return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
 
-        # .env 파일에서 기본값 가져오기
-        app_key = os.environ.get('KIS_APP_KEY')
-        app_secret_key = os.environ.get('KIS_APP_SECRET')
-        account_id = os.environ.get('KIS_ACCOUNT_ID')
-        account_suffix = os.environ.get('KIS_ACCOUNT_SUFFIX')
-        env = os.environ.get('KIS_ENV', 'vps')
-        
-        if not all([app_key, app_secret_key, account_id, account_suffix]):
-            return Response({"error": ".env 파일에 KIS 관련 설정이 올바르지 않습니다."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        app_key = (request.data.get('app_key') or '').strip()
+        app_secret_key = (request.data.get('app_secret') or '').strip()
+        account_number = (request.data.get('account_number') or '').strip()
+        env = (request.data.get('env') or 'vps').strip() or 'vps'
 
-        account_number = f"{account_id}-{account_suffix}"
+        source = "user"
+        # 사용자 키 셋 중 하나라도 비어있으면 .env fallback
+        if not all([app_key, app_secret_key, account_number]):
+            app_key = os.environ.get('KIS_APP_KEY') or app_key
+            app_secret_key = os.environ.get('KIS_APP_SECRET') or app_secret_key
+            account_id = os.environ.get('KIS_ACCOUNT_ID')
+            account_suffix = os.environ.get('KIS_ACCOUNT_SUFFIX')
+            env = os.environ.get('KIS_ENV', env)
+            if account_id and account_suffix:
+                account_number = f"{account_id}-{account_suffix}"
+            source = "system_env"
 
-        # KisAccount 모델에 정보 저장/업데이트
+        if not all([app_key, app_secret_key, account_number]):
+            return Response(
+                {"error": "KIS 키/계좌번호 정보가 부족합니다 (.env 도 미설정)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         kis_account, created = KisAccount.objects.update_or_create(
             user=user,
             defaults={
@@ -765,9 +807,29 @@ class KisAccountConnectView(APIView):
         kis_account.set_app_key(app_key)
         kis_account.set_app_secret_key(app_secret_key)
         kis_account.save()
-        
-        message = "KIS 계좌가 성공적으로 연결되었습니다." if created else "KIS 계좌 정보가 업데이트되었습니다."
-        return Response({"message": message}, status=status.HTTP_200_OK)
+
+        return Response({
+            "message": "KIS 계좌가 연결되었습니다." if created else "KIS 계좌 정보가 업데이트되었습니다.",
+            "kis_connected": True,
+            "kis_account_number": account_number,
+            "kis_env": env,
+            "source": source,  # 'user' or 'system_env' — 운영자가 어느 키로 저장됐는지 확인용
+        }, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        user_id = request.data.get('user_id')
+        if not user_id:
+            return Response({"error": "사용자 정보가 필요합니다."}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            user = User.objects.get(user_id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "존재하지 않는 사용자입니다."}, status=status.HTTP_404_NOT_FOUND)
+
+        deleted_count, _ = KisAccount.objects.filter(user=user).delete()
+        return Response({
+            "message": "KIS 계좌 연동이 해제되었습니다." if deleted_count else "이미 미연동 상태입니다.",
+            "kis_connected": False,
+        }, status=status.HTTP_200_OK)
 
 
 class UserDetailView(APIView):
@@ -779,14 +841,22 @@ class UserDetailView(APIView):
     def get(self, request, user_id):
         try:
             user = User.objects.get(user_id=user_id)
+            kis = KisAccount.objects.filter(user=user).first()
+            tg = TelegramLink.objects.filter(user=user).first()
             data = {
                 "user_id": user.user_id,
+                "login_id": user.login_id,
                 "phone": user.phone,
                 "name": user.name,
                 "birthdate": user.birthdate,
                 "notify_morning": user.notify_morning,
                 "notify_evening": user.notify_evening,
                 "notify_event": user.notify_event,
+                "kis_connected": bool(kis),
+                "kis_account_number": kis.account_number if kis else None,
+                "kis_env": kis.env if kis else None,
+                "telegram_connected": bool(tg),
+                "telegram_username": tg.telegram_username if tg else None,
                 "created_at": user.created_at,
                 "updated_at": user.updated_at,
             }
