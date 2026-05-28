@@ -1,0 +1,18 @@
+[Unit]
+Description=Stockpia MATE 정기 브리핑 발송 (kind=%i)
+After=network.target stockpia.service
+Wants=stockpia.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/stockpia
+EnvironmentFile=/home/ubuntu/stockpia/.env
+ExecStart=/home/ubuntu/stockpia/venv/bin/python manage.py send_briefing --kind %i
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600
+
+# 메모: 이 서비스는 timer (stockpia-briefing@morning.timer / @evening.timer) 가 호출.
+# %i 는 instance 이름 (morning|evening) — Type=oneshot 이라 timer 가 켜질 때마다 1회 실행.

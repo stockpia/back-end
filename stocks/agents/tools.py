@@ -34,6 +34,17 @@ logger = logging.getLogger(__name__)
 # ─── 사용자 컨텍스트 헬퍼 ──────────────────────────────────
 
 def _get_user(user_id: str) -> Optional[User]:
+    """
+    user_id (UUID 문자열) → User. LLM 이 가끔 user name 을 넘기는 경우가 있어
+    UUID 형식 검증을 먼저 하고 안 맞으면 조용히 None 반환.
+    """
+    import uuid as _uuid
+    if not user_id:
+        return None
+    try:
+        _uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        return None  # invalid UUID — 로그 노이즈 줄임
     try:
         return User.objects.filter(user_id=user_id).first()
     except Exception as e:

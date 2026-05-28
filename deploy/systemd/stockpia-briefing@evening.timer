@@ -1,0 +1,11 @@
+[Unit]
+Description=Stockpia MATE evening briefing — 매일 17:30 KST 발송
+Requires=stockpia-briefing@evening.service
+
+[Timer]
+OnCalendar=*-*-* 17:30:00
+Persistent=true
+Unit=stockpia-briefing@evening.service
+
+[Install]
+WantedBy=timers.target
