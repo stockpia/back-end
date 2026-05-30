@@ -594,7 +594,7 @@ class StockDetailReportView(APIView):
         try:
             detail_report_service = WebDetailReport()
 
-            # demo 모드: 보유 종목 기준 가상 거래 생성 후 주입 (운영 영향 X)
+            # demo 모드: 보유 종목 + 평가손익 기준 가상 거래 생성 후 주입 (운영 영향 X)
             injected = None
             if demo:
                 from .services.demo_data import build_demo_transactions
@@ -602,7 +602,8 @@ class StockDetailReportView(APIView):
                     holdings = detail_report_service.hantu.get_holding_stock_detail()
                 except Exception:
                     holdings = []
-                injected = build_demo_transactions(holdings)
+                # period 별로 매수 날짜 분포를 다르게 — 1m/3m/1y 탭이 의미 있게 다름
+                injected = build_demo_transactions(holdings, period=period)
                 if symbol != "ALL":
                     injected = [t for t in injected if t["pdno"] == symbol]
 
