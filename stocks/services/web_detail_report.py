@@ -198,12 +198,30 @@ class WebDetailReport:
                 f"자세한 거래내역은 상단의 거래내역을 스크롤하여 확인하세요 !"
             )
 
+        # 거래내역 raw 리스트 — UI 가 날짜/가격/수량 테이블 표시할 수 있게.
+        # KIS 응답 키를 프론트가 다루기 쉬운 이름으로 변환 + 최신순 정렬.
+        transactions_view = [
+            {
+                "date": t.get("ord_dt"),
+                "ticker": t.get("pdno"),
+                "name": t.get("prdt_name"),
+                "side": "sell" if t.get("sll_buy_dvsn_cd") == "01" else "buy",
+                "side_label": t.get("sll_buy_dvsn_cd_name"),
+                "quantity": t.get("tot_ccld_qty"),
+                "price": t.get("avg_prvs"),
+                "amount": t.get("tot_ccld_amt"),
+            }
+            for t in transactions
+        ]
+        transactions_view.sort(key=lambda x: (x.get("date") or ""), reverse=True)
+
         return {
             "scope": scope,
             "period": period,
             "actual_period_days": actual_days,
             "summary_metrics": summary_metrics,
             "by_stock_summary": by_stock_summary,
+            "transactions": transactions_view,
             "trading_tendency": trading_tendency,
             "frequency_change": frequency_change,
             "water_down_pattern": water_down_pattern,
@@ -743,6 +761,7 @@ class WebDetailReport:
                 "total_trades": 0,
             },
             "by_stock_summary": [],
+            "transactions": [],
             "trading_tendency": None,
             "frequency_change": None,
             "water_down_pattern": None,
