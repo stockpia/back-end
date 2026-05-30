@@ -573,35 +573,55 @@ class StockDetailReportView(APIView):
     def get(self, request, symbol):
         user_id = request.query_params.get('user_id', 'default_user')
         period = request.query_params.get('period', '1m')
+        demo = request.query_params.get('demo', '').lower() in ('1', 'true', 'yes')
 
         original_symbol = symbol
         symbol = resolve_symbol(symbol)
-        
+
         if symbol.startswith("ERROR:"):
             return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
         if not symbol.isdigit() and symbol != "ALL":
             return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
+        # 운영 캐시 (demo 모드는 캐시 우회 — 시연마다 fresh)
         cache_key = f"web04_detail_{symbol}_{user_id}_{period}"
-        cached_data = cache.get(cache_key)
-
-        if cached_data:
-            return Response(cached_data)
+        if not demo:
+            cached_data = cache.get(cache_key)
+            if cached_data:
+                return Response(cached_data)
 
         try:
             detail_report_service = WebDetailReport()
+
+            # demo 모드: 보유 종목 기준 가상 거래 생성 후 주입 (운영 영향 X)
+            injected = None
+            if demo:
+                from .services.demo_data import build_demo_transactions
+                try:
+                    holdings = detail_report_service.hantu.get_holding_stock_detail()
+                except Exception:
+                    holdings = []
+                injected = build_demo_transactions(holdings)
+                if symbol != "ALL":
+                    injected = [t for t in injected if t["pdno"] == symbol]
 
             # 서비스 계층 호출
             result = detail_report_service.get_detail_report(
                 scope=symbol,
                 period=period,
+                transactions=injected,
             )
+
+            if demo:
+                result["demo_mode"] = True
+                result["demo_note"] = "?demo=1 — 보유 종목 기반 가상 거래로 시연된 응답 (실 거래내역 X)"
 
             if "error" in result:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
-            cache.set(cache_key, result, 3600)
+            if not demo:
+                cache.set(cache_key, result, 3600)
             return Response(result, status=status.HTTP_200_OK)
 
         # noinspection PyBroadException

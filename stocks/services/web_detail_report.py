@@ -104,13 +104,20 @@ class WebDetailReport:
     # 6-3: 상세 리포트
     # ========================================
 
-    def get_detail_report(self, scope: str = "ALL", period: str = "1m") -> Dict:
+    def get_detail_report(
+        self,
+        scope: str = "ALL",
+        period: str = "1m",
+        transactions: Optional[List[Dict]] = None,
+    ) -> Dict:
         """
         6-3 상세 리포트
 
         Args:
             scope: 범위 ("ALL" 또는 종목코드)
             period: 기간 ("1m", "3m", "1y")
+            transactions: 외부에서 주입할 거래내역 (테스트 / demo 모드용).
+                None 이면 KIS API 에서 자체 조회 (운영 기본).
 
         Returns:
             {
@@ -124,8 +131,9 @@ class WebDetailReport:
                 "period_insufficient_message": null
             }
         """
-        # 1단계: 거래내역 조회
-        transactions = self.hantu.get_transaction_history(period=period)
+        # 1단계: 거래내역 조회 (외부 주입 우선)
+        if transactions is None:
+            transactions = self.hantu.get_transaction_history(period=period)
 
         # 2단계: 범위 필터링
         if scope != "ALL":
@@ -208,22 +216,45 @@ class WebDetailReport:
         }
 
     def _calculate_metrics(self, transactions: List[Dict]) -> Dict:
-        """전체 요약 메트릭 계산"""
+        """
+        전체 요약 메트릭 계산.
+
+        realized_profit 정의 (기존 'total_sell - total_buy' 는 매수만 한 종목을
+        -100% 로 보이게 하는 버그):
+          각 종목별 matched_qty = min(buy_qty, sell_qty) 만큼만 실현,
+          realized = matched_qty × (sell_avg - buy_avg). 매도 안 한 종목은 0.
+          일반적인 trade matching (FIFO 단순) 정의에 부합.
+        """
         total_buy = 0
         total_sell = 0
         buy_count = 0
         sell_count = 0
+        by_stock = {}  # pdno → buy_amt/buy_qty/sell_amt/sell_qty
 
         for t in transactions:
             amt = t["tot_ccld_amt"]
+            qty = t["tot_ccld_qty"]
+            pdno = t["pdno"]
+            s = by_stock.setdefault(pdno, {"buy_amt": 0, "buy_qty": 0, "sell_amt": 0, "sell_qty": 0})
             if t["sll_buy_dvsn_cd"] == "02":
                 total_buy += amt
                 buy_count += 1
+                s["buy_amt"] += amt
+                s["buy_qty"] += qty
             else:
                 total_sell += amt
                 sell_count += 1
+                s["sell_amt"] += amt
+                s["sell_qty"] += qty
 
-        realized_profit = total_sell - total_buy if total_sell > 0 else 0
+        realized_profit = 0
+        for s in by_stock.values():
+            if s["sell_qty"] <= 0 or s["buy_qty"] <= 0:
+                continue
+            buy_avg = s["buy_amt"] / s["buy_qty"]
+            sell_avg = s["sell_amt"] / s["sell_qty"]
+            matched = min(s["buy_qty"], s["sell_qty"])
+            realized_profit += int(matched * (sell_avg - buy_avg))
 
         return {
             "total_buy_amount": total_buy,
@@ -258,11 +289,17 @@ class WebDetailReport:
 
         result = []
         for pdno, data in stocks.items():
-            if data["buy_amount"] > 0:
-                profit = data["sell_amount"] - data["buy_amount"]
-                rate = round(profit / data["buy_amount"] * 100, 1)
+            # 매수 + 매도 모두 있을 때만 realized 의미 — matched_qty × (sell_avg - buy_avg)
+            if data["buy_qty"] > 0 and data["sell_qty"] > 0:
+                buy_avg = data["buy_amount"] / data["buy_qty"]
+                sell_avg = data["sell_amount"] / data["sell_qty"]
+                matched = min(data["buy_qty"], data["sell_qty"])
+                profit = int(matched * (sell_avg - buy_avg))
+                cost_basis = matched * buy_avg
+                rate = round(profit / cost_basis * 100, 1) if cost_basis > 0 else 0
             else:
-                profit = data["sell_amount"]
+                # 매수만 / 매도만 한 종목 → realized 정의상 0 (unrealized 는 별도)
+                profit = 0
                 rate = 0
 
             data["realized_profit"] = profit
