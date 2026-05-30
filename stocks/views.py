@@ -614,14 +614,41 @@ class StockDetailReportView(APIView):
                 transactions=injected,
             )
 
-            if demo:
+            # 자동 demo fallback: ?demo= 없이 들어왔는데 실 거래 0건이고 보유종목 있으면
+            # 시연용 가상 거래로 자동 재생성. KIS 모의계좌엔 무상입고만 있고 매매기록 없는
+            # 경우가 흔하고, 빈 응답은 UX 상 의미 없음. demo_mode 플래그로 사실 명시.
+            used_fallback = False
+            if not demo and result.get("summary_metrics", {}).get("total_trades", 0) == 0:
+                from .services.demo_data import build_demo_transactions
+                try:
+                    holdings = detail_report_service.hantu.get_holding_stock_detail()
+                except Exception:
+                    holdings = []
+                if holdings:
+                    fallback_tx = build_demo_transactions(holdings, period=period)
+                    if symbol != "ALL":
+                        fallback_tx = [t for t in fallback_tx if t["pdno"] == symbol]
+                    if fallback_tx:
+                        result = detail_report_service.get_detail_report(
+                            scope=symbol,
+                            period=period,
+                            transactions=fallback_tx,
+                        )
+                        used_fallback = True
+
+            if demo or used_fallback:
                 result["demo_mode"] = True
-                result["demo_note"] = "?demo=1 — 보유 종목 기반 가상 거래로 시연된 응답 (실 거래내역 X)"
+                result["demo_note"] = (
+                    "?demo=1 — 보유 종목 기반 가상 거래로 시연된 응답 (실 거래내역 X)"
+                    if demo
+                    else "실 거래내역이 없어 보유 종목 기반 시연 데이터로 자동 생성된 응답입니다"
+                )
 
             if "error" in result:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
-            if not demo:
+            # demo / fallback 모두 캐시 우회 (시연 항상 fresh)
+            if not demo and not used_fallback:
                 cache.set(cache_key, result, 3600)
             return Response(result, status=status.HTTP_200_OK)
 
