@@ -465,6 +465,17 @@ class StockChartDataProvider:
             data = chart_data["data"]
             dates = data["dates"]
 
+            # OHL=0 보정 — 거래정지/거래 없음 일자는 KIS 가 OHL=0, Close 만 마지막
+            # 종가로 응답함. 그대로 그리면 캔들 몸통이 0 부터 close 까지 길게 뻗어
+            # 비현실적으로 보임 (예: 에이리츠 140910 정지 기간). close 값으로 채워
+            # OHLC 동일한 1점 캔들 (보합) 로 표시.
+            def _patch_zero(series, ref):
+                return [r if (v == 0 or v is None) else v for v, r in zip(series, ref)]
+            close_ref = list(data["close"])
+            data["open"]  = _patch_zero(data["open"],  close_ref)
+            data["high"]  = _patch_zero(data["high"],  close_ref)
+            data["low"]   = _patch_zero(data["low"],   close_ref)
+
             # 시계열 데이터를 datetime으로 변환
             if period == "1d":
                 # 분봉: HH:MM 형식
