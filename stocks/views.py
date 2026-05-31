@@ -91,6 +91,17 @@ class StockChartView(APIView):
     def get(self, request, symbol):
         chart_range = request.query_params.get('range', '3m')
         chart_type = request.query_params.get('type', 'candlestick')
+        # 분봉 간격 (range='1d' 일 때만 유효). 허용: 1, 5, 10, 15, 30, 60.
+        # 미지정 시 None → get_minute_chart_data 의 default (10분) 사용.
+        interval_raw = request.query_params.get('interval')
+        interval: int | None = None
+        if interval_raw:
+            try:
+                v = int(interval_raw)
+                if v in (1, 5, 10, 15, 30, 60):
+                    interval = v
+            except (TypeError, ValueError):
+                interval = None
 
         original_symbol = symbol
         symbol = resolve_symbol(symbol)
@@ -107,7 +118,9 @@ class StockChartView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        cache_key = f"chart_{symbol}_{chart_range}_{chart_type}"
+        # interval 도 cache key 에 포함 — 같은 (symbol, 1d, candlestick) 도
+        # 분봉 간격이 다르면 다른 응답.
+        cache_key = f"chart_{symbol}_{chart_range}_{chart_type}_{interval or 'auto'}"
         cached_data = cache.get(cache_key)
 
         if cached_data:
@@ -115,7 +128,9 @@ class StockChartView(APIView):
 
         try:
             provider = StockChartDataProvider()
-            result = provider.get_chart_api(symbol, range=chart_range, type=chart_type)
+            result = provider.get_chart_api(
+                symbol, range=chart_range, type=chart_type, interval=interval
+            )
 
             if result.get('plotly') is None:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)

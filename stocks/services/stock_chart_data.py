@@ -439,7 +439,8 @@ class StockChartDataProvider:
         ticker: str,
         period: str = "3m",
         show_ma: bool = True,
-        show_volume: bool = True
+        show_volume: bool = True,
+        minute_interval: Optional[int] = None,
     ) -> Dict:
         """
         캔들스틱 차트 생성 (Plotly fig.to_json())
@@ -454,9 +455,12 @@ class StockChartDataProvider:
             return {"error": "Plotly가 설치되지 않았거나 import에 실패했습니다."}
 
         try:
-            # 1d는 분봉, 나머지는 일봉
+            # 1d는 분봉, 나머지는 일봉. minute_interval 지정 시 그 값 사용.
             if period == "1d":
-                chart_data = self.get_minute_chart_data(ticker)
+                if minute_interval is not None:
+                    chart_data = self.get_minute_chart_data(ticker, interval=minute_interval)
+                else:
+                    chart_data = self.get_minute_chart_data(ticker)
             else:
                 chart_data = self.get_chart_data(ticker, period)
 
@@ -586,13 +590,19 @@ class StockChartDataProvider:
         except Exception as e:
             return {"error": str(e)}
 
-    def create_line_chart(self, ticker: str, period: str = "3m") -> Dict:
+    def create_line_chart(
+        self,
+        ticker: str,
+        period: str = "3m",
+        minute_interval: Optional[int] = None,
+    ) -> Dict:
         """
         라인 차트 생성 (종가 추이)
 
         Args:
             ticker: 종목코드
             period: 기간
+            minute_interval: 1d 일 때 분봉 간격 (1/5/10/15/30/60)
 
         Returns:
             dict: plotly JSON 및 메타 정보
@@ -602,7 +612,10 @@ class StockChartDataProvider:
 
         try:
             if period == "1d":
-                chart_data = self.get_minute_chart_data(ticker)
+                if minute_interval is not None:
+                    chart_data = self.get_minute_chart_data(ticker, interval=minute_interval)
+                else:
+                    chart_data = self.get_minute_chart_data(ticker)
             else:
                 chart_data = self.get_chart_data(ticker, period)
 
@@ -644,13 +657,19 @@ class StockChartDataProvider:
         except Exception as e:
             return {"error": str(e)}
 
-    def create_technical_chart(self, ticker: str, period: str = "3m") -> Dict:
+    def create_technical_chart(
+        self,
+        ticker: str,
+        period: str = "3m",
+        minute_interval: Optional[int] = None,  # noqa: ARG002 — 1d 미지원, 시그니처 통일용
+    ) -> Dict:
         """
         기술적 분석 차트 생성 (RSI + 볼린저밴드)
 
         Args:
             ticker: 종목코드
             period: 기간
+            minute_interval: 사용 안 함 (technical 은 일봉 기준). dispatch 호환용.
 
         Returns:
             dict: plotly JSON 및 메타 정보
@@ -746,13 +765,19 @@ class StockChartDataProvider:
         except Exception as e:
             return {"error": str(e)}
 
-    def create_volume_chart(self, ticker: str, period: str = "3m") -> Dict:
+    def create_volume_chart(
+        self,
+        ticker: str,
+        period: str = "3m",
+        minute_interval: Optional[int] = None,
+    ) -> Dict:
         """
         거래량 차트 생성
 
         Args:
             ticker: 종목코드
             period: 기간
+            minute_interval: 1d 일 때 분봉 간격
 
         Returns:
             dict: plotly JSON 및 메타 정보
@@ -762,7 +787,10 @@ class StockChartDataProvider:
 
         try:
             if period == "1d":
-                chart_data = self.get_minute_chart_data(ticker)
+                if minute_interval is not None:
+                    chart_data = self.get_minute_chart_data(ticker, interval=minute_interval)
+                else:
+                    chart_data = self.get_minute_chart_data(ticker)
             else:
                 chart_data = self.get_chart_data(ticker, period)
 
@@ -809,7 +837,8 @@ class StockChartDataProvider:
         self,
         symbol: str,
         range: str = "3m",
-        type: str = "candlestick"
+        type: str = "candlestick",
+        interval: Optional[int] = None,
     ) -> Dict:
         """
         웹 API용 통합 차트 생성 메서드
@@ -818,6 +847,7 @@ class StockChartDataProvider:
             symbol: 종목코드
             range: 기간 (1d, 1m, 3m, 1y)
             type: 차트 타입 (candlestick, line, technical, volume)
+            interval: 분봉 간격 (range='1d' 일 때만). None 이면 각 메서드 default (10분).
 
         Returns:
             dict: 기획서 형식의 응답
@@ -830,7 +860,11 @@ class StockChartDataProvider:
         }
 
         method = chart_methods.get(type, self.create_candlestick_chart)
-        result = method(symbol, range)
+        # range='1d' + interval 지정 시 분봉 간격 전달, 그 외 기존 인터페이스
+        if range == "1d" and interval is not None:
+            result = method(symbol, range, minute_interval=interval)
+        else:
+            result = method(symbol, range)
 
         if "error" in result:
             return {
