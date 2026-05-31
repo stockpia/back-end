@@ -129,10 +129,14 @@ class StockListDataProvider:
         if "error" in ranking_result:
             return ranking_result
 
+        # KIS 랭킹 API 가 카테고리 (return/volume) "순위" 라고 주지만 실제 단조 정렬은
+        # 보장되지 않음 (예: 변동률 큰 절댓값 또는 거래량 변동 큰 순 등 혼재 케이스).
+        # → 우리가 직접 해당 필드로 재정렬해 응답 정합성 확보.
+        ranking_result["stocks"] = self.sort_stocks(
+            ranking_result["stocks"], sort_by=sort_by, order=order
+        )
         ranking_result["sort_by"] = sort_by
         ranking_result["order"] = order
-        if order == "asc":
-            ranking_result["stocks"] = list(reversed(ranking_result["stocks"]))
         return ranking_result
 
     # ==================== 보유 종목 리스트 ====================
