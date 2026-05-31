@@ -129,12 +129,22 @@ class StockListDataProvider:
         if "error" in ranking_result:
             return ranking_result
 
+        # 안전망 post-filter — KIS FID 필터로도 못 거르는 비정상 종목 차단:
+        # 정상 일일 등락률 한계 ±30% 보다 큰 절댓값 → 정지해제 폭락/폭등 분명.
+        # 거래량 1만주 미만도 정지/저유동 의심 → 컷.
+        filtered = [
+            s for s in ranking_result.get("stocks", [])
+            if abs(s.get("change_rate", 0) or 0) <= 30.5
+            and (s.get("volume", 0) or 0) >= 10000
+        ]
+        ranking_result["stocks"] = filtered
+
         # KIS 랭킹 API 가 카테고리 (return/volume) "순위" 라고 주지만 실제 단조 정렬은
-        # 보장되지 않음 (예: 변동률 큰 절댓값 또는 거래량 변동 큰 순 등 혼재 케이스).
-        # → 우리가 직접 해당 필드로 재정렬해 응답 정합성 확보.
+        # 보장되지 않음 → 우리가 직접 해당 필드로 재정렬해 응답 정합성 확보.
         ranking_result["stocks"] = self.sort_stocks(
             ranking_result["stocks"], sort_by=sort_by, order=order
         )
+        ranking_result["count"] = len(ranking_result["stocks"])
         ranking_result["sort_by"] = sort_by
         ranking_result["order"] = order
         return ranking_result
