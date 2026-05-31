@@ -1014,6 +1014,12 @@ class HantuStock:
             base_url = self._base_url
             headers = self._header(tr_id)
 
+        # 정지/관리/정리매매 종목이 ranking 상위에 끼는 문제 (예: 에이리츠 140910
+        # 정지해제 직후 -64.92% 가 "상승률 순위" 1위) 완화:
+        #   - return ranking: FID_RSFL_RATE1="0" (0% 이상 — 음수 자동 제외)
+        #   - 양쪽 모두: FID_VOL_CNT="10000" (1만주 미만 → 거의 거래 없는 정지/저유동 제외)
+        # 100% 차단은 아니나 (KIS FID exclude flag 는 문서 불분명) 대표 비정상 케이스
+        # 대부분 거름. 추가 안전망은 stock_list_data 의 post-filter 가 잡음.
         params = {
             "FID_COND_MRKT_DIV_CODE":  market,
             "FID_COND_SCR_DIV_CODE":   scr_div,
@@ -1023,11 +1029,11 @@ class HantuStock:
             "FID_PRC_CLS_CODE":        "0",
             "FID_INPUT_PRICE_1":       "",
             "FID_INPUT_PRICE_2":       "",
-            "FID_VOL_CNT":             "",
+            "FID_VOL_CNT":             "10000",
             "FID_TRGT_CLS_CODE":       "0",
             "FID_TRGT_EXLS_CLS_CODE":  "0",
             "FID_DIV_CLS_CODE":        "0",
-            "FID_RSFL_RATE1":          "",
+            "FID_RSFL_RATE1":          ("0" if category == "return" else ""),
             "FID_RSFL_RATE2":          "",
         }
 

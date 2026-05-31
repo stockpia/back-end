@@ -393,13 +393,14 @@ class StockChartDataProvider:
 
     # ==================== 5분봉 데이터 (하루 탭용) ====================
 
-    def get_minute_chart_data(self, ticker: str, interval: int = 5) -> Dict:
+    def get_minute_chart_data(self, ticker: str, interval: int = 10) -> Dict:
         """
         분봉 차트 데이터 조회 (하루 탭용)
 
         Args:
             ticker: 종목코드
-            interval: 분봉 간격 (기본 5분)
+            interval: 분봉 간격 (기본 10분 — 정규장 390분/10 = 39개 캔들로 모바일
+                가시성 균형. 이전 5분 = 78개는 모바일에서 너무 좁음)
 
         Returns:
             dict: 분봉 OHLCV 데이터
