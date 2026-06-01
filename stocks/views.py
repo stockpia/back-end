@@ -79,6 +79,54 @@ def resolve_symbol(symbol_or_name: str) -> str:
     return results[0]["ticker"]
 
 
+def _kst_now():
+    """현재 한국 시각 (Asia/Seoul). Django TIME_ZONE 도 Asia/Seoul 이라
+    naive datetime 만 필요."""
+    from datetime import datetime, timezone, timedelta
+    return datetime.now(timezone(timedelta(hours=9)))
+
+
+def _market_status_and_ttl(chart_range: str) -> tuple[str, int]:
+    """
+    range='1d' 차트의 시장 상태 + 캐시 TTL 결정.
+
+    Returns:
+        (status, ttl_seconds)
+        status: 'open' (정규장 중) | 'closed' (장 마감 후 / 주말 / 공휴일)
+
+    정규장 중: TTL 60초 (실시간 갱신).
+    장외: 다음 정규장 시작 (09:00 KST 평일) 까지의 초 — 그 동안 KIS 호출 없음.
+    """
+    if chart_range != '1d':
+        # 일봉은 일/주/년 단위라 5분 캐시면 충분 (변경 빈도 낮음)
+        return ('open', 300)
+
+    from datetime import timedelta
+    now = _kst_now()
+    weekday = now.weekday()  # Mon=0 .. Sun=6
+    open_t = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
+
+    if weekday < 5 and open_t <= now <= close_t:
+        # 정규장 중
+        return ('open', 60)
+
+    # 다음 정규장 시작 시각 계산
+    nxt = open_t
+    if now > close_t and weekday < 5:
+        # 평일 장 마감 후 → 다음 날 09:00
+        nxt = open_t + timedelta(days=1)
+    elif now < open_t and weekday < 5:
+        # 평일 장 시작 전 → 오늘 09:00 (그대로)
+        pass
+    # 주말 또는 위에서 다음날이 토/일인 경우 → 월요일까지 점프
+    while nxt.weekday() >= 5:
+        nxt = nxt + timedelta(days=1)
+
+    ttl = max(60, int((nxt - now).total_seconds()))
+    return ('closed', ttl)
+
+
 class StockChartView(APIView):
     """
     Web 01 - 종목 차트 API
@@ -135,7 +183,14 @@ class StockChartView(APIView):
             if result.get('plotly') is None:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
-            ttl = 60 if chart_range == '1d' else 300
+            # 시장 상태 + 적응형 TTL — 장 마감 후엔 다음 정규장 시작까지 캐시
+            market_status, ttl = _market_status_and_ttl(chart_range)
+            if chart_range == '1d':
+                result['market_status'] = market_status  # 'open' | 'closed'
+                result['market_close_kst'] = _kst_now().replace(
+                    hour=15, minute=30, second=0, microsecond=0
+                ).isoformat()
+
             cache.set(cache_key, result, ttl)
 
             return Response(result)
