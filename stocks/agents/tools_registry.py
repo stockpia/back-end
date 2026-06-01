@@ -3,6 +3,10 @@ LangGraph 가 바인딩할 도구 레지스트리.
 
 ReplyAgent / BriefingAgent 등 모든 Agent 는 여기서 ALL_TOOLS 를 import 해서
 같은 카탈로그를 공유 (Agent 마다 도구 새로 짤 필요 X — 설계 가이드 §3 원칙).
+
+매매 도구 (place_order / cancel_order / get_pending_orders) 는 프론트 매수/매도
+UI 제거에 맞춰 registry 에서 제외. 함수 자체는 tools.py 에 남아있어 향후 다시
+노출 시 재추가만 하면 됨.
 """
 from __future__ import annotations
 
@@ -10,16 +14,13 @@ from typing import Dict, List
 
 from .tools import (
     calculate_averaging,
-    cancel_order,
     get_current_price,
     get_financial_summary,
     get_market_overview,
     get_notification_history,
-    get_pending_orders,
     get_stock_news,
     get_user_favorites,
     get_user_holdings,
-    place_order,
     send_telegram,
 )
 
@@ -30,9 +31,6 @@ ALL_TOOLS = [
     get_stock_news,
     get_financial_summary,
     calculate_averaging,
-    get_pending_orders,
-    place_order,
-    cancel_order,
     get_market_overview,
     send_telegram,
     get_notification_history,
