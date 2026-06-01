@@ -743,10 +743,18 @@ class StockReportView(APIView):
     def get(self, request, symbol):
         try:
             user_id = request.query_params.get('user_id', 'default_user')
+            # 투자성향 (1=안정형 ~ 5=공격투자형). default=3 (위험중립형) — 미설정 사용자.
+            profile_raw = request.query_params.get('profile_level')
+            try:
+                profile_level = int(profile_raw) if profile_raw else 3
+            except (TypeError, ValueError):
+                profile_level = 3
+            if profile_level not in (1, 2, 3, 4, 5):
+                profile_level = 3
 
             original_symbol = symbol
             symbol = resolve_symbol(symbol)
-            
+
             if symbol.startswith("ERROR:"):
                 return Response({"error": f"'{original_symbol}' 종목 검색 실패. {symbol}"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -754,7 +762,7 @@ class StockReportView(APIView):
                 return Response({"error": f"'{original_symbol}' 종목을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
 
             web_report = WebStockReport()
-            
+
             # 1. 프론트엔드에서 넘어온 값을 우선적으로 받는다.
             company_name = request.query_params.get('company_name')
 
@@ -763,13 +771,16 @@ class StockReportView(APIView):
                 info = web_report.chart_provider.get_stock_info(symbol)
                 company_name = info.get('company_name', original_symbol if not original_symbol.isdigit() else symbol)
 
-            cache_key = f"web05_report_{symbol}_{user_id}"
+            # 캐시 키에 profile_level 포함 — 같은 종목도 성향별로 다른 리포트.
+            cache_key = f"web05_report_{symbol}_{user_id}_p{profile_level}"
 
             cached_data = cache.get(cache_key)
             if cached_data:
                return Response(cached_data)
 
-            result = web_report.get_report(symbol, company_name, user_id)
+            result = web_report.get_report(
+                symbol, company_name, user_id, profile_level=profile_level
+            )
 
             if "error" in result:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)

@@ -100,9 +100,17 @@ class WebStockReport:
     # LLM 텍스트 생성 (웹용 확장)
     # ========================================
 
-    def _generate_llm_text(self, prompt: str) -> Optional[str]:
-        """LLM 텍스트 생성. OpenAI primary → Gemini fallback (llm_client 가 자동 처리)."""
+    def _generate_llm_text(self, prompt: str, tone_guide: Optional[str] = None) -> Optional[str]:
+        """LLM 텍스트 생성. OpenAI primary → Gemini fallback (llm_client 가 자동 처리).
+
+        Args:
+            prompt: 본 프롬프트.
+            tone_guide: 투자성향 톤 가이드 (None 이면 무시). 본 프롬프트 앞에
+                "[독자 성향]\\n<guide>\\n\\n" prefix 로 붙음.
+        """
         from .llm_client import generate
+        if tone_guide:
+            prompt = f"[독자 성향]\n{tone_guide}\n\n{prompt}"
         # 섹션별 응답은 1~5문장이면 충분 → 1024 로 한도 낮춰 LLM 이 빠르게 종료
         return generate(prompt, temperature=0.3, max_output_tokens=1024)
 
@@ -209,7 +217,7 @@ RSI: {rsi_info.get('value', 'N/A')} ({rsi_info.get('signal', {}).get('descriptio
 - 인사말 없이 바로 작성
 - 위에 제공된 데이터만 언급하세요. 데이터에 없는 지표는 언급하지 마세요."""
 
-        result = self._generate_llm_text(prompt)
+        result = self._generate_llm_text(prompt, tone_guide=data.get('_tone_guide'))
 
         full_text = ""
         key_points = []
@@ -357,7 +365,7 @@ ROE: {fundamental.get('roe', 'N/A')}%{dart_section}
 - 인사말 없이 바로 작성
 - 위에 제공된 데이터만 언급하세요. 데이터에 없는 지표는 언급하지 마세요."""
 
-        result = self._generate_llm_text(prompt)
+        result = self._generate_llm_text(prompt, tone_guide=data.get('_tone_guide'))
 
         interpretation = ""
         key_points = []
@@ -443,7 +451,7 @@ PER: {_fmt(per)} / PBR: {_fmt(pbr)} / ROE: {_fmt(roe, '%')} / EPS: {_fmt(eps, '�
 - 매수/매도 추천 금지
 - "~에요", "~있어요" 친근한 말투, 인사말 없이 해석만"""
 
-        result = self._generate_llm_text(prompt)
+        result = self._generate_llm_text(prompt, tone_guide=data.get('_tone_guide'))
         interpretation = ""
         if result:
             cleaned = self._clean_markdown(result)
@@ -525,7 +533,7 @@ RSI: {rsi_info.get('value', 'N/A')} / 추세: {trend.get('description', 'N/A') i
 - pros/cons/checkpoints 는 각각 2~4개.
 - 모든 문자열은 한국어, 1문장 (이모지·마크다운 X)."""
 
-        result = self._generate_llm_text(prompt)
+        result = self._generate_llm_text(prompt, tone_guide=data.get('_tone_guide'))
 
         pros, cons, checkpoints = [], [], []
         perspective = {"short_term": "", "mid_term": "", "long_term": ""}
@@ -566,7 +574,22 @@ RSI: {rsi_info.get('value', 'N/A')} / 추세: {trend.get('description', 'N/A') i
     # 메인 API: 전체 리포트 조회
     # ========================================
 
-    def get_report(self, symbol: str, company_name: str, user_id: str = "default") -> Dict:
+    # 투자성향 1-5 단계별 LLM 톤 가이드 (프론트 investmentProfile.ts 의 aiPrompt 와 정합)
+    PROFILE_TONE_GUIDES = {
+        1: "독자는 안정형 투자자입니다. 하방 방어력과 배당·실적 안정성을 강조하고, 변동성과 손실 가능성에 보수적 톤으로 경고하세요.",
+        2: "독자는 안정추구형 투자자입니다. 우량주·대형주 중심으로 설명하고 급등주/테마주 관련 위험은 반드시 명시하세요.",
+        3: "독자는 위험중립형 투자자입니다. 팩트 중심 분석가 톤으로 호재와 악재의 비중을 5:5로 균형있게 다루고 펀더멘털을 철저히 분석하세요.",
+        4: "독자는 적극투자형 투자자입니다. 주도 섹터의 자금 이동과 실적 턴어라운드 모멘텀을 강조하되, 진입 시 리스크 관리도 짚어주세요.",
+        5: "독자는 공격투자형 투자자입니다. 거래량 급증·신고가 돌파·강력한 공시 재료 위주로 행동주의적 톤으로 브리핑하되, 단기 변동성 경고는 유지하세요.",
+    }
+
+    def get_report(
+        self,
+        symbol: str,
+        company_name: str,
+        user_id: str = "default",
+        profile_level: int = 3,
+    ) -> Dict:
         """
         전체 종목 리포트 조회 (GET /api/web/stocks/{symbol}/report)
 
@@ -574,6 +597,8 @@ RSI: {rsi_info.get('value', 'N/A')} / 추세: {trend.get('description', 'N/A') i
             symbol: 종목코드
             company_name: 회사명
             user_id: 사용자 ID (관심 종목 확인용)
+            profile_level: 투자성향 (1=안정형 .. 5=공격투자형). default=3 위험중립형.
+                각 섹션의 LLM 프롬프트 prefix 에 톤 가이드로 주입.
 
         Returns:
             기획서 Section 6-1 응답 스키마에 맞는 JSON
@@ -593,6 +618,13 @@ RSI: {rsi_info.get('value', 'N/A')} / 추세: {trend.get('description', 'N/A') i
 
         # 관심 종목 여부
         is_favorite = self._is_favorite(user_id, symbol)
+
+        # 투자성향 톤 가이드 — 각 섹션 빌더에서 LLM 프롬프트 prefix 로 사용 가능하도록
+        # 호출자 data dict 에 저장.
+        data["_tone_guide"] = self.PROFILE_TONE_GUIDES.get(
+            profile_level, self.PROFILE_TONE_GUIDES[3]
+        )
+        data["_profile_level"] = profile_level
 
         # 5개 섹션을 ThreadPool 로 병렬 생성 (직렬 5-15초 → 가장 느린 1개 시간)
         from concurrent.futures import ThreadPoolExecutor
