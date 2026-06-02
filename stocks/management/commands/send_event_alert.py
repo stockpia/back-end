@@ -70,7 +70,14 @@ class Command(BaseCommand):
             .filter(user__notify_event=True)
         )
         if not targets:
-            self.stdout.write("[event] notify_event 켠 사용자 없음 — 종료")
+            tl_total = TelegramLink.objects.count()
+            from stocks.models import User as _U
+            ne_total = _U.objects.filter(notify_event=True).count()
+            self.stdout.write(
+                f"[event] 발사 대상 0명 — "
+                f"TelegramLink={tl_total}건, notify_event=True 사용자={ne_total}명. "
+                f"{'텔레그램 연동 필요' if tl_total == 0 else '둘 다 만족하는 사용자 없음'}"
+            )
             return
 
         token = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
