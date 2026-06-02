@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 BRIEFING_MODEL = (os.environ.get("BRIEFING_AGENT_MODEL") or "gpt-4o-mini").strip()
 MAX_STEPS = 6  # ReplyAgent 보다 1 더 — 도구 여러 개 호출 여지
 
+# 웹앱 deep link 베이스 — 텔레그램 메시지의 종목/페이지 링크에 사용.
+# 운영에서 도메인 변경 시 .env 의 MATE_WEB_BASE_URL 로 오버라이드.
+WEB_BASE_URL = (
+    os.environ.get("MATE_WEB_BASE_URL") or "https://aitrademate.netlify.app"
+).strip().rstrip("/")
+
 SYSTEM_BASE = (
     "당신은 한국 주식시장 전문 어시스턴트 MATE 입니다. "
     "사용자가 묻지 않았지만 능동적으로 보내는 브리핑을 작성합니다.\n\n"
@@ -51,20 +57,28 @@ SYSTEM_BASE = (
     "3. 최근 7일 알림 이력에 이미 보낸 내용은 중복하지 말 것.\n"
     "4. 정보가 부족할 땐 도구 (get_user_holdings, get_current_price, get_stock_news, "
     "get_market_overview, get_notification_history 등) 를 자율 호출.\n"
-    "5. 답변은 텔레그램 메시지 — 3~6문장 / 600자 이내.\n"
+    "5. 답변은 텔레그램 메시지 — 5~8문장 / 1200자 이내. 정보 양보다 '왜 중요한지' 한 줄 해석을 곁들이세요.\n"
     "6. 마크다운 굵게(`*텍스트*`)는 가능하나 과용 금지.\n"
+    "7. 종목 / 페이지 링크 동봉:\n"
+    f"   - 종목 상세 리포트: {WEB_BASE_URL}/stocks/{{6자리코드}} — 차트·재무·AI 의견.\n"
+    f"   - 보유 종목 거래 리포트: {WEB_BASE_URL}/trades/{{user_id}} — 매매 기록·집중도.\n"
+    f"   - 알림/계정 설정: {WEB_BASE_URL}/mypage\n"
+    "   주요 종목 언급 시 위 URL 형식으로 한 줄에 하나씩 첨부 (텔레그램이 자동 클릭 링크화).\n"
+    "8. 구조: ① 한 줄 헤드라인 → ② 핵심 이슈 2-4개 (각 1-2문장 + 링크) → ③ 다음 행동 안내 한 줄.\n"
 )
 
 PROMPT_MORNING = (
     "지금 시각은 장 시작 직전입니다. "
     "사용자의 보유 종목 + 관심 종목 기준으로 '오늘 시장 시작 전에 알아둘 것' "
-    "을 짧게 정리해 주세요. 미장 흐름, 보유 종목 시간외, 호재/악재 뉴스 우선."
+    "을 정리해 주세요. 미장 흐름, 보유 종목 시간외, 호재/악재 뉴스 우선. "
+    "각 종목 언급 시 상세 페이지 링크를 한 줄로 첨부하세요."
 )
 
 PROMPT_EVENING = (
     "지금 시각은 장 마감 후입니다. "
     "사용자의 보유 종목 결과 위주로 '오늘 시장이 어땠는지' "
-    "를 짧게 정리해 주세요. 등락 큰 종목, 미체결 주문 상태, 내일 챙길 이슈 우선."
+    "를 정리해 주세요. 등락 큰 종목, 내일 챙길 이슈 우선. "
+    "큰 변동 종목은 상세 리포트 링크, 마지막 줄에는 거래 리포트(/trades/{user_id}) 링크로 마무리."
 )
 
 
@@ -85,9 +99,11 @@ def _user_context_text(user_id: str, kind: str) -> str:
 
     lines = [
         f"[사용자 컨텍스트] 이름: {user.name}",
+        f"user_id: {user_id} (링크용 — /trades/{user_id} 등)",
         f"kind: {kind} (morning=장 시작 전, evening=장 마감 후)",
         f"KIS 연동: {'예' if KisAccount.objects.filter(user=user).exists() else '아니오'}",
         f"알림 설정: morning={user.notify_morning}, evening={user.notify_evening}, event={user.notify_event}",
+        f"웹앱 base URL: {WEB_BASE_URL}",
     ]
 
     # 최근 7일 알림 이력
