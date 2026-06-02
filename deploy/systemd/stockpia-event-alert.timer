@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger MATE 이벤트 알림 (보유 종목 ±5%) — 15분 간격
+After=network.target
+
+[Timer]
+# 매 15분 (0, 15, 30, 45) 마다 실행. command 가 KST 평일 09:00-15:30 외에는 자동 skip.
+OnCalendar=*-*-* *:00,15,30,45:00
+Persistent=true
+Unit=stockpia-event-alert.service
+
+[Install]
+WantedBy=timers.target

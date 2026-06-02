@@ -1,0 +1,18 @@
+[Unit]
+Description=Stockpia MATE 보유 종목 ±5% 이벤트 알림
+After=network.target stockpia.service
+Wants=stockpia.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/stockpia
+EnvironmentFile=/home/ubuntu/stockpia/.env
+ExecStart=/home/ubuntu/stockpia/venv/bin/python manage.py send_event_alert
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=300
+
+# 메모: timer (stockpia-event-alert.timer) 가 정규장 15분 간격 호출.
+# command 가 KST 시간 체크로 장외 시간 자동 skip → timer 는 단순 매 15분.
