@@ -35,6 +35,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
 from ..models import KisAccount, NotificationLog, User
+from ..services.glossary_api import GlossaryAPI
 from .tools_registry import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -49,37 +50,93 @@ WEB_BASE_URL = (
 ).strip().rstrip("/")
 
 SYSTEM_BASE = (
-    "당신은 한국 주식시장 전문 어시스턴트 MATE 입니다. "
-    "사용자가 묻지 않았지만 능동적으로 보내는 브리핑을 작성합니다.\n\n"
+    "당신은 한국 주식시장 전문 어시스턴트 MATE 입니다.\n"
+    "사용자가 묻지 않아도 매일 아침/저녁 능동적으로 보내는 브리핑을 작성합니다.\n\n"
     "원칙:\n"
     "1. 매수/매도 추천 금지 — 정보 제공만.\n"
-    "2. 변동 ±1~2% 같이 자명한 정보는 생략. ±5% 이상이거나 호재/악재만 언급.\n"
+    "2. 변동 ±1~2% 같이 자명한 정보는 생략. ±5% 이상이거나 호재/악재 우선.\n"
     "3. 최근 7일 알림 이력에 이미 보낸 내용은 중복하지 말 것.\n"
-    "4. 정보가 부족할 땐 도구 (get_user_holdings, get_current_price, get_stock_news, "
-    "get_market_overview, get_notification_history 등) 를 자율 호출.\n"
-    "5. 답변은 텔레그램 메시지 — 5~8문장 / 1200자 이내. 정보 양보다 '왜 중요한지' 한 줄 해석을 곁들이세요.\n"
-    "6. 마크다운 굵게(`*텍스트*`)는 가능하나 과용 금지.\n"
-    "7. 종목 / 페이지 링크 동봉:\n"
-    f"   - 종목 상세 리포트: {WEB_BASE_URL}/stocks/{{6자리코드}} — 차트·재무·AI 의견.\n"
-    f"   - 보유 종목 거래 리포트: {WEB_BASE_URL}/trades/{{user_id}} — 매매 기록·집중도.\n"
-    f"   - 알림/계정 설정: {WEB_BASE_URL}/mypage\n"
-    "   주요 종목 언급 시 위 URL 형식으로 한 줄에 하나씩 첨부 (텔레그램이 자동 클릭 링크화).\n"
-    "8. 구조: ① 한 줄 헤드라인 → ② 핵심 이슈 2-4개 (각 1-2문장 + 링크) → ③ 다음 행동 안내 한 줄.\n"
+    "4. 데이터는 도구 자율 호출: get_user_holdings, get_user_favorites, "
+    "get_current_price, get_stock_news, get_market_overview, "
+    "get_notification_history, get_financial_summary.\n"
+    "5. 텔레그램 메시지 — 1200자 이내. 정보 양보다 '왜 중요한지' 한 줄 해석.\n"
+    "6. 마크다운 굵게(`*텍스트*`)는 가능하나 과용 금지. 이모지는 섹션 머리에만.\n"
+    "7. 종목/페이지 링크는 plain URL 로 (텔레그램이 자동 클릭 링크화):\n"
+    f"   - 종목 상세: {WEB_BASE_URL}/stocks/{{6자리코드}}\n"
+    f"   - 거래 리포트: {WEB_BASE_URL}/trades/{{user_id}}\n"
+    f"   - 알림/계정: {WEB_BASE_URL}/mypage\n\n"
+    "고정 출력 포맷 (반드시 이 구조 + 섹션 이모지 그대로):\n\n"
+    "☕️/🌙 [헤드라인 한 줄] ([오늘 날짜])\n\n"
+    "📊 시장 한눈에\n"
+    "코스피·코스닥 지수 + 핵심 한 줄. 오늘 특이사항 (FOMC·실적·이벤트) 있으면 1줄.\n\n"
+    "💼 내 포트폴리오\n"
+    "총 평가 / 예수금 / 보유 N개. 변동 큰 종목 2-3개만 (금액·수익률·링크).\n"
+    "*평가 금액 및 수익률은 현재가 기준입니다.*\n\n"
+    "👀 관심종목\n"
+    "관심종목 중 의미 있는 변동 1-2개. 사유 + 변동률 + 링크.\n\n"
+    "🤖 오늘의 AI 픽\n"
+    "✅ *종목명 (6자리코드)*\n"
+    "최근 이슈/실적 2-3문장 + 상세 링크.\n"
+    "※ 정보 제공이며 투자 권유가 아닙니다.\n\n"
+    "📚 오늘의 용어\n"
+    "[사용자 컨텍스트] 에 주어진 용어 카드를 그대로 본문에 옮기세요 "
+    "(term + description + tip 구조 유지).\n\n"
+    "섹션 데이터가 없을 때: '오늘은 특이사항 없음' / '관심종목 미설정' / "
+    "'보유 종목 없음 — 마이페이지에서 연동' 등 한 줄 안내. 빈 섹션 생략 금지."
 )
 
 PROMPT_MORNING = (
-    "지금 시각은 장 시작 직전입니다. "
-    "사용자의 보유 종목 + 관심 종목 기준으로 '오늘 시장 시작 전에 알아둘 것' "
-    "을 정리해 주세요. 미장 흐름, 보유 종목 시간외, 호재/악재 뉴스 우선. "
-    "각 종목 언급 시 상세 페이지 링크를 한 줄로 첨부하세요."
+    "지금 시각은 장 시작 직전입니다 (아침 브리핑).\n"
+    "헤드라인 이모지는 ☕️, '오늘의 MATE' 류 한 줄.\n"
+    "포커스: 미장 흐름, 보유/관심 종목 시간외, 호재/악재, 오늘 챙길 일정.\n"
+    "AI 픽은 사용자 보유/관심 종목 중 오늘 가장 의미 큰 1종목."
 )
 
 PROMPT_EVENING = (
-    "지금 시각은 장 마감 후입니다. "
-    "사용자의 보유 종목 결과 위주로 '오늘 시장이 어땠는지' "
-    "를 정리해 주세요. 등락 큰 종목, 내일 챙길 이슈 우선. "
-    "큰 변동 종목은 상세 리포트 링크, 마지막 줄에는 거래 리포트(/trades/{user_id}) 링크로 마무리."
+    "지금 시각은 장 마감 후입니다 (저녁 브리핑).\n"
+    "헤드라인 이모지는 🌙, '오늘의 마감 요약' 류 한 줄.\n"
+    "포커스: 시장 마감 지수, 보유 종목 등락 결과, 내일 챙길 이슈.\n"
+    "AI 픽은 오늘 가장 큰 이슈가 있었던 보유/관심 종목 1개."
 )
+
+
+def _pick_daily_term() -> str | None:
+    """오늘 날짜 기반 deterministic 용어 1개 선택 (term + description + tip).
+    매일 다른 용어가 노출되도록 ordinal day 를 mod 로 사용."""
+    try:
+        api = GlossaryAPI()
+        terms = api.get_all_terms()
+        if not terms:
+            return None
+        today = timezone.now().date()
+        # date.toordinal() 가 매일 +1 → 같은 날 = 같은 용어, 다른 날 = 회전
+        entry = api.lookup(terms[today.toordinal() % len(terms)])
+        if not entry:
+            return None
+        name = entry.get("term", "")
+        full_name = entry.get("full_name", "")
+        desc = (entry.get("description", "") or "").strip()
+        if not desc:
+            return None
+        header = f"*{name}*" + (f" ({full_name})" if full_name else "")
+        # tip 후보 — interpretation 안의 정보가 있으면 한 줄 압축
+        tip_raw = ""
+        interp = entry.get("interpretation")
+        if isinstance(interp, dict):
+            # interpretation 안의 첫 값을 짧게
+            for v in interp.values():
+                if isinstance(v, str) and v.strip():
+                    tip_raw = v.strip()
+                    break
+        example = (entry.get("example", "") or "").strip()
+        tip = tip_raw or example
+        lines = [header, desc]
+        if tip:
+            lines.append(f"- *Tip*: {tip}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning("[BRIEFING] glossary term load failed: %s", e)
+        return None
 
 
 # ─── State + Graph ───────────────────────────────────────
@@ -117,6 +174,14 @@ def _user_context_text(user_id: str, kind: str) -> str:
         lines.append("최근 7일 알림 이력 (중복 방지용):")
         for r in recent:
             lines.append(f"  - {r.sent_at:%m-%d %H:%M} kind={r.kind} success={r.success}")
+
+    # 오늘의 용어 카드 — 매일 다른 용어가 회전 노출.
+    term_card = _pick_daily_term()
+    if term_card:
+        lines.append("")
+        lines.append("[오늘의 용어 카드 — '📚 오늘의 용어' 섹션에 그대로 사용]")
+        lines.append(term_card)
+
     return "\n".join(lines)
 
 
