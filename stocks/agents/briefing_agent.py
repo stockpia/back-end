@@ -56,48 +56,48 @@ SYSTEM_BASE = (
     "1. 매수/매도 추천 금지 — 정보 제공만.\n"
     "2. 변동 ±1~2% 같이 자명한 정보는 생략. ±5% 이상이거나 호재/악재 우선.\n"
     "3. 최근 7일 알림 이력에 이미 보낸 내용은 중복하지 말 것.\n"
-    "4. 데이터는 반드시 도구 호출로 수집 (추정·창작 금지):\n"
-    "   - get_user_holdings(user_id): 보유 종목 + 수량·평가금액·수익률\n"
-    "   - get_user_favorites(user_id): 관심 종목 리스트\n"
-    "   - get_current_price(symbol): 현재가·전일 대비·거래량\n"
-    "   - get_market_overview(): 코스피·코스닥 지수·등락률·특이사항\n"
-    "   - get_stock_news(symbol, days): 종목 뉴스 (호재/악재 분류)\n"
-    "   - get_financial_summary(symbol): 실적·재무 지표 (영업이익·EPS 등)\n"
-    "   - get_notification_history(user_id, days): 최근 알림 (중복 방지)\n"
-    "5. 텔레그램 메시지 — 1800자 이내 (한도 안에서 풍부하게). "
+    "4. [사용자 컨텍스트] 에 미리 주입된 카드 (보유/관심/시장/용어) 는 *그대로 사용*. "
+    "수치·종목·지수 값을 절대 다른 값으로 바꾸거나 추정하지 마세요.\n"
+    "5. 컨텍스트에 없는 정보는 도구 호출:\n"
+    "   - get_current_price(symbol): 종목 현재가·등락률\n"
+    "   - get_stock_news(symbol, days): 호재/악재 키워드 추출용\n"
+    "   - get_financial_summary(symbol): 실적·재무 (영업이익·EPS)\n"
+    "6. 도구 결과에 없는 수치는 추정 금지. 모르는 항목은 '확인 필요' 또는 생략.\n"
+    "7. 텔레그램 메시지 — 1800자 이내 (한도 안에서 풍부하게). "
     "단순 나열보다 '왜 중요한지' 한 줄 해석을 매 섹션에 곁들이세요.\n"
-    "6. 마크다운 굵게(`*텍스트*`)는 핵심 종목명·수치 위주. 이모지는 섹션 머리에만.\n"
-    "7. 종목/페이지 링크는 plain URL 로 (텔레그램이 자동 클릭 링크화):\n"
+    "8. 마크다운 굵게(`*텍스트*`)는 핵심 종목명·수치 위주. 이모지는 섹션 머리에만.\n"
+    "9. 종목/페이지 링크는 *반드시* 우리 웹앱 plain URL 만 사용:\n"
     f"   - 종목 상세: {WEB_BASE_URL}/stocks/{{6자리코드}}\n"
     f"   - 거래 리포트: {WEB_BASE_URL}/trades/{{user_id}}\n"
-    f"   - 알림/계정: {WEB_BASE_URL}/mypage\n\n"
+    f"   - 알림/계정: {WEB_BASE_URL}/mypage\n"
+    "   외부 뉴스 URL (news.naver.com, stock.mk.co.kr, biz.chosun.com 등) 본문에 *절대 첨부 금지*.\n"
+    "   '자세히 보기' 같은 안내도 우리 웹앱 종목 상세 링크로 대체.\n\n"
     "고정 출력 포맷 (반드시 이 구조 + 섹션 이모지 그대로, 빈 섹션도 한 줄 안내로 채움):\n\n"
     "☕️/🌙 [짧고 매력적인 헤드라인] ([오늘 날짜, 예: 6월 2일])\n\n"
     "📊 시장 한눈에\n"
-    "- 코스피·코스닥 지수 값 + 등락률 명시 (예: 코스피 6,598.87 -1.38%).\n"
+    "- *반드시* [시장 개요] 카드의 코스피·코스닥 값을 그대로 옮기세요 (둘 다 필수).\n"
     "- 마감 (저녁) 또는 미장·전일 흐름 (아침) 1줄.\n"
-    "- 오늘 특이사항 (FOMC·실적 발표·정책 이벤트·환율·국제 이슈) 있으면 1줄 추가, 없으면 '오늘 특이사항 없음'.\n\n"
+    "- 오늘 특이사항 (FOMC·실적 발표·정책 이벤트·환율) 있으면 1줄, 없으면 '오늘 특이사항 없음'.\n\n"
     "💼 내 포트폴리오\n"
-    "- 1줄 요약: 총 평가 X원 / 예수금 Y원 / 보유 N개.\n"
-    "- 보유 종목 중 수익률 상위 3개 또는 오늘 변동 큰 3개:\n"
-    "  - *종목명*: 평가금액 (수익률 +/-X.XX%)  → 상세 링크\n"
-    "- *평가 금액 및 수익률은 현재가 기준입니다.*\n"
-    "- 보유 0개면 'KIS 계좌 연동 후 표시됩니다 → /mypage 링크' 안내.\n\n"
+    "- [보유 종목] 카드를 *그대로 옮기세요* (값 수정 금지).\n"
+    "- 카드 마지막에 '*평가 금액 및 수익률은 현재가 기준입니다.*' 추가.\n\n"
     "👀 관심종목\n"
-    "- 관심 종목 중 오늘 변동 의미 있는 1-2개:\n"
-    "  - *종목명*: 사유 (호재/악재 키워드) — 전일 대비 +/-X.X% → 상세 링크\n"
-    "- 사유는 뉴스 헤드라인 또는 재무 이벤트에서 한 줄 (예: '수주 모멘텀', 'EV 둔화 우려', '실적 어닝서프라이즈').\n"
-    "- 관심 종목 미설정이면 '관심종목 미설정 — 종목 페이지에서 ★ 추가' 안내.\n\n"
+    "- [관심 종목] 카드의 종목 중 오늘 변동/이슈 의미 있는 1-2개 선택.\n"
+    "- 선택한 종목에 대해 get_current_price + get_stock_news 호출해 사유·변동률 채움:\n"
+    "  - *종목명*: 사유 (호재/악재 키워드, 예: '수주 모멘텀', 'EV 둔화 우려') — 전일 대비 +/-X.X% → 상세 링크\n"
+    "- [관심 종목] 카드에 '미설정' 안내가 있으면 그 한 줄을 그대로 노출.\n\n"
     "🤖 오늘의 AI 픽\n"
+    "- 보유/관심 종목 중 1개 선택 (둘 다 없으면 시장 화제주 1개).\n"
+    "- 반드시 get_stock_news + get_financial_summary 호출해 실데이터 확보.\n"
     "✅ *종목명 (6자리코드)*\n"
-    "- 3-4문장 본문: (a) 최근 호재/이슈 + 수치 (실적·목표가·수주액 등) → "
-    "(b) 그 의미·맥락 (왜 시장이 반응하는지) → (c) 관전 포인트 (다음 catalyst).\n"
-    "- 상세 링크 1줄.\n"
+    "- 3-4문장 본문: (a) 최근 호재/이슈 + 도구 결과의 *실제 수치* → "
+    "(b) 의미·맥락 → (c) 관전 포인트 (다음 catalyst).\n"
+    f"- 마지막 줄: {WEB_BASE_URL}/stocks/{{6자리코드}} (외부 뉴스 URL 절대 금지).\n"
     "- ※ 정보 제공이며 투자 권유가 아닙니다.\n\n"
     "📚 오늘의 용어\n"
-    "[사용자 컨텍스트] 의 '오늘의 용어 카드' 를 그대로 본문에 옮기세요 "
-    "(term + description + tip 구조 + 마크다운 굵게 유지).\n\n"
-    "데이터가 없는 섹션은 한 줄 안내 ('보유 0개', '관심종목 미설정' 등) 로 채우고 섹션 자체는 생략하지 마세요."
+    "[오늘의 용어 카드] 의 줄바꿈·마크다운 굵게 (*term*) 를 *그대로* 보존해서 옮기세요. "
+    "한 줄로 합치지 말 것 (term 줄 / description 줄 / - *Tip*: ... 줄 세 줄 유지).\n\n"
+    "데이터가 없는 섹션은 한 줄 안내로 채우고 섹션 자체는 생략하지 마세요."
 )
 
 PROMPT_MORNING = (
@@ -164,19 +164,43 @@ class BriefingState(TypedDict):
 
 
 def _user_context_text(user_id: str, kind: str) -> str:
-    """보유 / 알림 설정 / 최근 알림 이력을 짧은 텍스트로 묶어 컨텍스트로 주입."""
+    """보유/관심 종목 + 시장 개요 + 알림 이력 + 용어 카드를 컨텍스트로 사전 주입.
+    LLM 이 도구 호출 안 하고 자기 지식으로 답하는 환각 케이스를 막기 위해 핵심
+    데이터를 미리 호출해서 텍스트로 포맷."""
     user = User.objects.filter(user_id=user_id).first()
     if not user:
         return f"[사용자 컨텍스트] user_id={user_id} 정보 없음."
 
+    has_kis = KisAccount.objects.filter(user=user).exists()
     lines = [
         f"[사용자 컨텍스트] 이름: {user.name}",
         f"user_id: {user_id} (링크용 — /trades/{user_id} 등)",
         f"kind: {kind} (morning=장 시작 전, evening=장 마감 후)",
-        f"KIS 연동: {'예' if KisAccount.objects.filter(user=user).exists() else '아니오'}",
+        f"KIS 연동: {'예' if has_kis else '아니오'}",
         f"알림 설정: morning={user.notify_morning}, evening={user.notify_evening}, event={user.notify_event}",
         f"웹앱 base URL: {WEB_BASE_URL}",
     ]
+
+    # ─── 보유 종목 사전 주입 ─────────────────────────
+    holdings_card = _holdings_card(user_id, has_kis=has_kis)
+    if holdings_card:
+        lines.append("")
+        lines.append("[보유 종목 — '💼 내 포트폴리오' 섹션에 그대로 사용]")
+        lines.append(holdings_card)
+
+    # ─── 관심 종목 사전 주입 ─────────────────────────
+    favorites_card = _favorites_card(user_id)
+    if favorites_card:
+        lines.append("")
+        lines.append("[관심 종목 — '👀 관심종목' 섹션 후보]")
+        lines.append(favorites_card)
+
+    # ─── 시장 개요 사전 주입 ─────────────────────────
+    market_card = _market_card()
+    if market_card:
+        lines.append("")
+        lines.append("[시장 개요 — '📊 시장 한눈에' 섹션에 그대로 사용]")
+        lines.append(market_card)
 
     # 최근 7일 알림 이력
     since = timezone.now() - timedelta(days=7)
@@ -186,6 +210,7 @@ def _user_context_text(user_id: str, kind: str) -> str:
         .order_by("-sent_at")[:10]
     )
     if recent:
+        lines.append("")
         lines.append("최근 7일 알림 이력 (중복 방지용):")
         for r in recent:
             lines.append(f"  - {r.sent_at:%m-%d %H:%M} kind={r.kind} success={r.success}")
@@ -198,6 +223,80 @@ def _user_context_text(user_id: str, kind: str) -> str:
         lines.append(term_card)
 
     return "\n".join(lines)
+
+
+def _holdings_card(_user_id: str, *, has_kis: bool) -> str | None:
+    """보유 종목 요약 카드 (총평가/예수금/상위 3개). 환각 차단용 사전 주입."""
+    if not has_kis:
+        return f"KIS 계좌 미연동 — 보유 종목 없음. {WEB_BASE_URL}/mypage 에서 연동 안내."
+    try:
+        from ..services.stock_list_data import StockListDataProvider
+        result = StockListDataProvider().get_holding_stocks(
+            sort_by="profit_rate", order="desc",
+        )
+        if isinstance(result, dict) and result.get("error"):
+            return f"보유 종목 조회 실패: {result['error']}"
+
+        holdings = result.get("stocks", []) if isinstance(result, dict) else []
+        if not holdings:
+            return (
+                f"총 평가 - / 예수금 - / 보유 0개 (모의계좌 거래 0건 가능성). "
+                f"{WEB_BASE_URL}/trades/{_user_id} 에서 거래 리포트 확인."
+            )
+
+        total_eval = sum(float(h.get("eval_amount", 0) or 0) for h in holdings)
+        head = f"보유 {len(holdings)}개 / 총 평가 약 {int(total_eval):,}원"
+        body = []
+        for h in holdings[:3]:
+            name = h.get("name", "")
+            ticker = h.get("ticker", "")
+            eval_amt = h.get("eval_amount", 0) or 0
+            pr = h.get("profit_rate", 0) or 0
+            body.append(
+                f"  - *{name}* ({ticker}): {int(eval_amt):,}원 ({pr:+.2f}%)  → "
+                f"{WEB_BASE_URL}/stocks/{ticker}"
+            )
+        return head + "\n" + "\n".join(body)
+    except Exception as e:
+        logger.warning("[BRIEFING] holdings card failed: %s", e)
+        return None
+
+
+def _favorites_card(_user_id: str) -> str | None:
+    """관심 종목 카드 — Favorite 모델 미구현이라 현재는 미설정 안내 고정.
+    W2 모델 도입 후 실제 쿼리로 교체."""
+    return "관심종목 미설정 — 종목 페이지에서 ★ 추가 안내."
+
+
+def _market_card() -> str | None:
+    """시장 개요 카드 — get_market_overview tool 의 raw 데이터를 직접 호출."""
+    try:
+        from .tools import get_market_overview
+        # @tool 데코레이터로 래핑된 함수도 .invoke({}) 또는 .func 으로 raw 호출 가능
+        raw_fn = getattr(get_market_overview, "func", None) or get_market_overview
+        data = raw_fn() if callable(raw_fn) else None
+        if not isinstance(data, dict):
+            return None
+        kospi = data.get("kospi") or {}
+        kosdaq = data.get("kosdaq") or {}
+        lines = []
+        if kospi:
+            lines.append(
+                f"코스피 {kospi.get('current', '-')} "
+                f"({kospi.get('change_rate', '-')}%)"
+            )
+        if kosdaq:
+            lines.append(
+                f"코스닥 {kosdaq.get('current', '-')} "
+                f"({kosdaq.get('change_rate', '-')}%)"
+            )
+        note = data.get("note") or data.get("comment")
+        if note:
+            lines.append(f"메모: {note}")
+        return "\n".join(lines) if lines else None
+    except Exception as e:
+        logger.warning("[BRIEFING] market card failed: %s", e)
+        return None
 
 
 def _make_llm() -> ChatOpenAI:
