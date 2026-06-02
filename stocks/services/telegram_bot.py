@@ -32,7 +32,7 @@ from telegram.ext import (  # noqa: E402
     filters,
 )
 
-from stocks.models import LinkToken, TelegramLink  # noqa: E402
+from stocks.models import KisAccount, LinkToken, TelegramLink  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +80,21 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "/start - 연동 안내\n"
             "/morning - 아침 브리핑 즉시 받기\n"
             "/evening - 저녁 브리핑 즉시 받기\n"
+            "/unlink - 텔레그램 + KIS 연동 모두 해제\n"
             "/help - 이 도움말\n\n"
             "연동 후엔 매일 정해진 시각에도 자동으로 브리핑이 도착합니다."
         ),
     )
+
+
+async def cmd_unlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/unlink` — 호출자의 TelegramLink + KisAccount + LinkToken 일괄 삭제."""
+    chat = update.effective_chat
+    if chat is None:
+        return
+
+    result = await _unlink_user(chat.id)
+    await context.bot.send_message(chat_id=chat.id, text=result)
 
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -230,6 +241,27 @@ def _compose_briefing(user_id: str, kind: str) -> str:
 
 
 @sync_to_async
+def _unlink_user(chat_id: int) -> str:
+    """chat_id 로 연동된 사용자의 TelegramLink + KisAccount + LinkToken 삭제."""
+    link = TelegramLink.objects.select_related("user").filter(chat_id=chat_id).first()
+    if not link:
+        return "❌ 이 채팅은 연동된 계정이 없어요. 이미 해제됐을 수 있습니다."
+
+    user = link.user
+    kis_n = KisAccount.objects.filter(user=user).delete()[0]
+    tok_n = LinkToken.objects.filter(user=user).delete()[0]
+    tg_n = TelegramLink.objects.filter(user=user).delete()[0]
+
+    return (
+        f"✅ {user.name}님 연동을 모두 해제했어요.\n\n"
+        f"- 텔레그램 링크: {tg_n}건\n"
+        f"- KIS 계좌: {kis_n}건\n"
+        f"- 미사용 링크 토큰: {tok_n}건\n\n"
+        "다시 연결하려면 웹 마이페이지에서 '텔레그램 알림 받기' 를 눌러주세요."
+    )
+
+
+@sync_to_async
 def _try_link(token_str: str, chat_id: int, telegram_username: str | None) -> str:
     """LinkToken 조회 → 유효하면 TelegramLink 생성/갱신."""
     try:
@@ -286,6 +318,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("morning", cmd_morning))
     app.add_handler(CommandHandler("evening", cmd_evening))
+    app.add_handler(CommandHandler("unlink", cmd_unlink))
     # 명령어가 아닌 일반 텍스트 → ReplyAgent
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_error_handler(on_error)
