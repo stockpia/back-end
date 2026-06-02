@@ -28,6 +28,10 @@ def search_stocks(query: str, limit: int = 20) -> List[Dict[str, str]]:
     """
     네이버 금융 종목 검색.
 
+    네이버는 5-6자 이상 긴 한글명 (예: "두산로보틱스") 에 빈 결과를 자주 주는데,
+    짧은 토큰 ("로보틱스", "두산") 에는 정상 응답.
+    → 1차 0건이면 query 의 앞/뒤 부분 토큰으로 retry 후 원 query 부분 일치 필터.
+
     Args:
         query: 검색어 (한글명 부분 일치, 6자리 코드, ETN 코드 모두 가능)
         limit: 최대 결과 수 (1-50)
@@ -41,6 +45,53 @@ def search_stocks(query: str, limit: int = 20) -> List[Dict[str, str]]:
         return []
     limit = max(1, min(50, int(limit)))
 
+    primary = _naver_search(q, limit)
+    if primary:
+        return primary
+
+    # 코드 직접 입력 (6자리) 인데 결과 없으면 종목 페이지 직접 조회.
+    if q.isdigit() and len(q) == 6:
+        name = _fetch_name_by_code(q)
+        if name:
+            return [{"ticker": q, "name": name}]
+
+    # 한글 긴 쿼리 fallback — 앞/뒤 토큰으로 검색 후 원 쿼리 substring 필터.
+    if len(q) >= 4:
+        merged: List[Dict[str, str]] = []
+        seen: set = set()
+        for token in _fallback_tokens(q):
+            partial = _naver_search(token, 50)
+            for item in partial:
+                name = item.get("name", "")
+                ticker = item.get("ticker", "")
+                if ticker in seen:
+                    continue
+                if q not in name:
+                    continue
+                seen.add(ticker)
+                merged.append(item)
+                if len(merged) >= limit:
+                    return merged
+        if merged:
+            return merged
+
+    return []
+
+
+def _fallback_tokens(q: str) -> List[str]:
+    """긴 한글 쿼리 → 앞 4자 / 뒤 4자 토큰 (중복 제거, 원 쿼리 자체 제외)."""
+    tokens: List[str] = []
+    seen: set = set()
+    for token in (q[-4:], q[:4], q[-3:], q[:3]):
+        if not token or token == q or token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tokens
+
+
+def _naver_search(q: str, limit: int) -> List[Dict[str, str]]:
+    """네이버 finance 1회 호출 + 파싱. 결과 없으면 빈 리스트."""
     try:
         encoded = urllib.parse.quote(q.encode("euc-kr"))
         url = f"{_SEARCH_URL}?query={encoded}"
@@ -51,13 +102,12 @@ def search_stocks(query: str, limit: int = 20) -> List[Dict[str, str]]:
 
     final_url = res.url or ""
 
-    # 완전 일치한 단일 종목인 경우 네이버가 종목 상세 페이지로 리다이렉트 → URL 에 code= 포함
+    # 완전 일치 단일 종목 → 네이버가 종목 상세로 리다이렉트
     if "code=" in final_url and "search/search.naver" not in final_url:
         code = final_url.split("code=")[1].split("&")[0]
         name = _extract_title_name(res.content, fallback=q)
         return [{"ticker": code, "name": name}]
 
-    # 검색 결과 리스트 페이지: td.tit a 로 종목 항목 추출
     try:
         soup = BeautifulSoup(res.content, "html.parser", from_encoding="euc-kr")
         a_tags = soup.select("td.tit a")
@@ -81,13 +131,6 @@ def search_stocks(query: str, limit: int = 20) -> List[Dict[str, str]]:
         results.append({"ticker": code, "name": name})
         if len(results) >= limit:
             break
-
-    # 코드 직접 입력 (예: 6자리 ticker) 인데 검색 결과가 비어있다면
-    # 종목 상세 페이지를 직접 조회해서 이름만 추출 (백업).
-    if not results and (q.isdigit() and len(q) == 6):
-        name = _fetch_name_by_code(q)
-        if name:
-            return [{"ticker": q, "name": name}]
 
     return results
 
