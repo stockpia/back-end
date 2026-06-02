@@ -126,7 +126,23 @@ class StockListDataProvider:
             return {"error": f"지원하지 않는 정렬 기준입니다: {sort_by} (volume, change_rate만 지원)"}
 
         ranking_result = self._get_ranking_stocks(category=category, limit=limit)
-        if "error" in ranking_result:
+        used_fallback = False
+
+        # 거래량 ranking endpoint 는 장외 / 주말 / 공휴일에 빈 응답이 옴 (KIS 정책).
+        # 등락률 ranking 은 그 시점에도 마지막 평일 스냅샷이 살아있음 → fluctuation
+        # 결과를 받아 volume 으로 재정렬하면 같은 종목 pool 에서 의미있는 응답 가능.
+        if sort_by == "volume" and (
+            ("error" in ranking_result)
+            or not ranking_result.get("stocks")
+        ):
+            fallback = self._get_ranking_stocks(category="return", limit=limit)
+            if "error" not in fallback and fallback.get("stocks"):
+                ranking_result = fallback
+                used_fallback = True
+            else:
+                # fluctuation 도 비어있으면 원래 에러 그대로
+                return ranking_result if "error" in ranking_result else {"error": "ranking 데이터 없음"}
+        elif "error" in ranking_result:
             return ranking_result
 
         # 안전망 post-filter — KIS FID 필터로도 못 거르는 비정상 종목 차단:
@@ -147,6 +163,9 @@ class StockListDataProvider:
         ranking_result["count"] = len(ranking_result["stocks"])
         ranking_result["sort_by"] = sort_by
         ranking_result["order"] = order
+        if used_fallback:
+            # 프론트가 "장외 시간 — 등락률 기준 종목 풀에서 거래량 순" 같은 라벨을 표시 가능
+            ranking_result["data_source"] = "fluctuation_fallback"
         return ranking_result
 
     # ==================== 보유 종목 리스트 ====================
