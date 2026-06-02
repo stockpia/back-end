@@ -78,8 +78,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text=(
             "사용 가능한 명령:\n"
             "/start - 연동 안내\n"
+            "/morning - 아침 브리핑 즉시 받기\n"
+            "/evening - 저녁 브리핑 즉시 받기\n"
             "/help - 이 도움말\n\n"
-            "연동 후에는 정해진 시각에 자동으로 브리핑이 도착합니다."
+            "연동 후엔 매일 정해진 시각에도 자동으로 브리핑이 도착합니다."
         ),
     )
 
@@ -90,6 +92,60 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if chat is None:
         return
     await context.bot.send_message(chat_id=chat.id, text="pong")
+
+
+# ─── 브리핑 즉시 발사 명령 ────────────────────────────────
+
+async def _send_briefing_now(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str
+) -> None:
+    """`/morning` / `/evening` 공통 처리 — 호출자에게만 즉시 발사."""
+    chat = update.effective_chat
+    if chat is None:
+        return
+
+    user_id = await _resolve_user_id_by_chat(chat.id)
+    if not user_id:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=(
+                "먼저 웹 마이페이지에서 '텔레그램 알림 받기' 를 눌러 계정을 연결해 주세요."
+            ),
+        )
+        return
+
+    try:
+        await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
+    except TelegramError:
+        pass
+
+    body = await _compose_briefing(user_id, kind)
+    if not body:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text="브리핑 본문이 비었어요. 잠시 후 다시 시도해 주세요.",
+        )
+        return
+
+    # 텔레그램 메시지 길이 제한 4096 — 안전하게 자름
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id, text=body[:3900], parse_mode="Markdown",
+        )
+    except TelegramError as e:
+        # Markdown 파싱 실패 시 plain 으로 재시도
+        logger.warning("[bot] markdown send failed (%s) — retry plain", e)
+        await context.bot.send_message(chat_id=chat.id, text=body[:3900])
+
+
+async def cmd_morning(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/morning` — 아침 브리핑 즉시 발사."""
+    await _send_briefing_now(update, context, kind="morning")
+
+
+async def cmd_evening(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/evening` — 저녁 브리핑 즉시 발사."""
+    await _send_briefing_now(update, context, kind="evening")
 
 
 # ─── 일반 텍스트 메시지 → ReplyAgent ──────────────────────
@@ -163,6 +219,17 @@ def _invoke_reply_agent(user_id: str, message: str) -> str:
 
 
 @sync_to_async
+def _compose_briefing(user_id: str, kind: str) -> str:
+    """BriefingAgent 호출 — sync ORM/LLM 작업이라 sync_to_async 래핑."""
+    from stocks.agents.briefing_agent import BriefingAgent
+    try:
+        return BriefingAgent().compose(user_id, kind) or ""
+    except Exception as e:
+        logger.exception("BriefingAgent.compose failed: %s", e)
+        return ""
+
+
+@sync_to_async
 def _try_link(token_str: str, chat_id: int, telegram_username: str | None) -> str:
     """LinkToken 조회 → 유효하면 TelegramLink 생성/갱신."""
     try:
@@ -217,6 +284,8 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("ping", cmd_ping))
+    app.add_handler(CommandHandler("morning", cmd_morning))
+    app.add_handler(CommandHandler("evening", cmd_evening))
     # 명령어가 아닌 일반 텍스트 → ReplyAgent
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_error_handler(on_error)
