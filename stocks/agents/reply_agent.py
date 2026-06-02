@@ -40,6 +40,11 @@ REPLY_AGENT_MODEL = (os.environ.get("REPLY_AGENT_MODEL") or "gpt-4o-mini").strip
 MAX_STEPS = 5
 HISTORY_LIMIT = 10
 
+# 웹앱 deep link 베이스 — BriefingAgent 와 공통 패턴.
+WEB_BASE_URL = (
+    os.environ.get("MATE_WEB_BASE_URL") or "https://aitrademate.netlify.app"
+).strip().rstrip("/")
+
 SYSTEM_INSTRUCTION = (
     "당신은 한국 주식시장 전문 어시스턴트 MATE 입니다. "
     "초보 투자자가 이해할 수 있도록 쉽고 친근하게 설명합니다. "
@@ -48,7 +53,12 @@ SYSTEM_INSTRUCTION = (
     "1. 사용자 보유 종목 / 시세 / 뉴스 / 재무 등 데이터가 필요하면 적절한 도구를 호출하세요.\n"
     "2. 도구 응답에 {\"error\": ...} 가 포함되면 사용자에게 솔직히 한계를 알리세요.\n"
     "3. 매매 (매수/매도) 는 현재 지원하지 않습니다. 매매 요청 시 정보 제공으로 안내하세요.\n"
-    "4. 답변은 텔레그램 메시지로 보내질 거니 너무 길지 않게 2-4문장으로 정리하세요."
+    "4. 답변은 텔레그램 — 3-5문장 (필요 시 6문장까지). 핵심 + '왜 중요한지' 한 줄 해석.\n"
+    "5. 종목 / 페이지 링크 동봉:\n"
+    f"   - 종목 상세: {WEB_BASE_URL}/stocks/{{6자리코드}}\n"
+    f"   - 거래 리포트: {WEB_BASE_URL}/trades/{{user_id}}\n"
+    f"   - 알림/계정: {WEB_BASE_URL}/mypage\n"
+    "   특정 종목 언급 시 해당 상세 URL 1줄 첨부 (텔레그램이 자동 클릭 링크화)."
 )
 
 
@@ -69,13 +79,17 @@ def _load_user_context_text(user_id: str) -> str:
         if not user:
             return f"[사용자 컨텍스트] user_id={user_id} 정보 없음."
 
-        lines = [f"[사용자 컨텍스트] 이름: {user.name}"]
+        lines = [
+            f"[사용자 컨텍스트] 이름: {user.name}",
+            f"user_id: {user_id} (링크용 — /trades/{user_id} 등)",
+        ]
         has_kis = KisAccount.objects.filter(user=user).exists()
         lines.append(f"KIS 계좌 연동: {'예' if has_kis else '아니오'}")
         lines.append(
             "알림 설정: morning="
             f"{user.notify_morning}, evening={user.notify_evening}, event={user.notify_event}"
         )
+        lines.append(f"웹앱 base URL: {WEB_BASE_URL}")
         return "\n".join(lines)
     except Exception as e:
         logger.warning("[REPLY-AGENT] load user context failed: %s", e)
