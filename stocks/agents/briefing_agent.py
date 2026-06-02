@@ -75,7 +75,9 @@ SYSTEM_BASE = (
     "고정 출력 포맷 (반드시 이 구조 + 섹션 이모지 그대로, 빈 섹션도 한 줄 안내로 채움):\n\n"
     "☕️/🌙 [짧고 매력적인 헤드라인] ([오늘 날짜, 예: 6월 2일])\n\n"
     "📊 시장 한눈에\n"
-    "- *반드시* [시장 개요] 카드의 코스피·코스닥 값을 그대로 옮기세요 (둘 다 필수).\n"
+    "- [시장 개요] 카드가 있으면 코스피·코스닥 값을 *그대로* 옮기세요 (값 수정·추정 금지).\n"
+    "- [시장 개요] 카드가 *없으면* 지수 값 표시 자체를 생략하고 시장 흐름 1줄만 작성. "
+    "절대로 코스피·코스닥 숫자를 추정하거나 환각으로 채우지 마세요.\n"
     "- 마감 (저녁) 또는 미장·전일 흐름 (아침) 1줄.\n"
     "- 오늘 특이사항 (FOMC·실적 발표·정책 이벤트·환율) 있으면 1줄, 없으면 '오늘 특이사항 없음'.\n\n"
     "💼 내 포트폴리오\n"
@@ -83,15 +85,17 @@ SYSTEM_BASE = (
     "- 카드 마지막에 '*평가 금액 및 수익률은 현재가 기준입니다.*' 추가.\n\n"
     "🤖 오늘의 AI 픽\n"
     "- [보유 종목] 카드에서 1개 선택 (없으면 시장 대형주 1개).\n"
-    "- 반드시 get_stock_news + get_financial_summary 호출해 실데이터 확보.\n"
+    "- 반드시 get_current_price + get_stock_news + get_financial_summary 호출해 실데이터 확보 "
+    "(현재가는 반드시 도구 결과 사용, 추정 금지).\n"
     "✅ *종목명 (6자리코드)*\n"
     "- 3-4문장 본문: (a) 최근 호재/이슈 + 도구 결과의 *실제 수치* → "
     "(b) 의미·맥락 → (c) 관전 포인트 (다음 catalyst).\n"
     f"- 마지막 줄: {WEB_BASE_URL}/stocks/{{6자리코드}} (외부 뉴스 URL 절대 금지).\n"
     "- ※ 정보 제공이며 투자 권유가 아닙니다.\n\n"
     "📚 오늘의 용어\n"
-    "[오늘의 용어 카드] 의 줄바꿈·마크다운 굵게 (*term*) 를 *그대로* 보존해서 옮기세요. "
-    "한 줄로 합치지 말 것 (term 줄 / description 줄 / - *Tip*: ... 줄 세 줄 유지).\n\n"
+    "[오늘의 용어 카드] 의 용어 *정확히 1개만* 옮기세요. 카드에 명시된 term 외에 "
+    "다른 용어를 추가하지 마세요 (예: '상장사', '주가' 등 임의 추가 절대 금지).\n"
+    "줄바꿈·마크다운 굵게 (*term*) 를 *그대로* 보존 (term 줄 / description 줄 / - *Tip*: ... 세 줄).\n\n"
     "데이터가 없는 섹션은 한 줄 안내로 채우고 섹션 자체는 생략하지 마세요."
 )
 
@@ -251,30 +255,28 @@ def _holdings_card(_user_id: str, *, has_kis: bool) -> str | None:
 
 
 def _market_card() -> str | None:
-    """시장 개요 카드 — get_market_overview tool 의 raw 데이터를 직접 호출."""
+    """코스피/코스닥 지수 사전 주입 — 네이버 모바일 stock API 호출.
+    get_market_overview tool 은 top_gainers/top_volume 만 주고 지수는 없어서
+    별도 소스 필요. 호출 실패 시 None → SYSTEM_BASE 가 LLM 환각 차단."""
     try:
-        from .tools import get_market_overview
-        # @tool 데코레이터로 래핑된 함수도 .invoke({}) 또는 .func 으로 raw 호출 가능
-        raw_fn = getattr(get_market_overview, "func", None) or get_market_overview
-        data = raw_fn() if callable(raw_fn) else None
-        if not isinstance(data, dict):
-            return None
-        kospi = data.get("kospi") or {}
-        kosdaq = data.get("kosdaq") or {}
+        import requests
         lines = []
-        if kospi:
-            lines.append(
-                f"코스피 {kospi.get('current', '-')} "
-                f"({kospi.get('change_rate', '-')}%)"
-            )
-        if kosdaq:
-            lines.append(
-                f"코스닥 {kosdaq.get('current', '-')} "
-                f"({kosdaq.get('change_rate', '-')}%)"
-            )
-        note = data.get("note") or data.get("comment")
-        if note:
-            lines.append(f"메모: {note}")
+        for code, label in [("KOSPI", "코스피"), ("KOSDAQ", "코스닥")]:
+            try:
+                res = requests.get(
+                    f"https://m.stock.naver.com/api/index/{code}/basic",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=3,
+                )
+                if res.status_code != 200:
+                    continue
+                d = res.json() or {}
+                price = d.get("closePrice") or "-"
+                ratio = d.get("fluctuationsRatio") or "-"
+                lines.append(f"{label} {price} ({ratio}%)")
+            except Exception as e:
+                logger.warning("[BRIEFING] index fetch %s failed: %s", code, e)
+                continue
         return "\n".join(lines) if lines else None
     except Exception as e:
         logger.warning("[BRIEFING] market card failed: %s", e)
