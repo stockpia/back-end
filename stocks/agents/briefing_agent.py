@@ -81,13 +81,8 @@ SYSTEM_BASE = (
     "💼 내 포트폴리오\n"
     "- [보유 종목] 카드를 *그대로 옮기세요* (값 수정 금지).\n"
     "- 카드 마지막에 '*평가 금액 및 수익률은 현재가 기준입니다.*' 추가.\n\n"
-    "👀 관심종목\n"
-    "- [관심 종목] 카드의 종목 중 오늘 변동/이슈 의미 있는 1-2개 선택.\n"
-    "- 선택한 종목에 대해 get_current_price + get_stock_news 호출해 사유·변동률 채움:\n"
-    "  - *종목명*: 사유 (호재/악재 키워드, 예: '수주 모멘텀', 'EV 둔화 우려') — 전일 대비 +/-X.X% → 상세 링크\n"
-    "- [관심 종목] 카드에 '미설정' 안내가 있으면 그 한 줄을 그대로 노출.\n\n"
     "🤖 오늘의 AI 픽\n"
-    "- 보유/관심 종목 중 1개 선택 (둘 다 없으면 시장 화제주 1개).\n"
+    "- [보유 종목] 카드에서 1개 선택 (없으면 시장 대형주 1개).\n"
     "- 반드시 get_stock_news + get_financial_summary 호출해 실데이터 확보.\n"
     "✅ *종목명 (6자리코드)*\n"
     "- 3-4문장 본문: (a) 최근 호재/이슈 + 도구 결과의 *실제 수치* → "
@@ -188,13 +183,6 @@ def _user_context_text(user_id: str, kind: str) -> str:
         lines.append("[보유 종목 — '💼 내 포트폴리오' 섹션에 그대로 사용]")
         lines.append(holdings_card)
 
-    # ─── 관심 종목 사전 주입 ─────────────────────────
-    favorites_card = _favorites_card(user_id)
-    if favorites_card:
-        lines.append("")
-        lines.append("[관심 종목 — '👀 관심종목' 섹션 후보]")
-        lines.append(favorites_card)
-
     # ─── 시장 개요 사전 주입 ─────────────────────────
     market_card = _market_card()
     if market_card:
@@ -260,12 +248,6 @@ def _holdings_card(_user_id: str, *, has_kis: bool) -> str | None:
     except Exception as e:
         logger.warning("[BRIEFING] holdings card failed: %s", e)
         return None
-
-
-def _favorites_card(_user_id: str) -> str | None:
-    """관심 종목 카드 — Favorite 모델 미구현이라 현재는 미설정 안내 고정.
-    W2 모델 도입 후 실제 쿼리로 교체."""
-    return "관심종목 미설정 — 종목 페이지에서 ★ 추가 안내."
 
 
 def _market_card() -> str | None:
