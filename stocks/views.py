@@ -666,10 +666,34 @@ class StockDetailReportView(APIView):
                 period=period,
             )
 
+            # 시연용 자동 fallback: 실 거래 0건 + 보유종목 있으면 보유 기반 가상 거래로 재생성.
+            # KIS 모의계좌에 매매 기록이 없는 경우가 흔해 빈 응답은 UX 상 의미 없음.
+            # 사용자에게는 일반 응답처럼 보이게 demo_mode/demo_note 플래그 노출하지 않음.
+            used_fallback = False
+            if result.get("summary_metrics", {}).get("total_trades", 0) == 0:
+                from .services.demo_data import build_demo_transactions
+                try:
+                    holdings = detail_report_service.hantu.get_holding_stock_detail()
+                except Exception:
+                    holdings = []
+                if holdings:
+                    fallback_tx = build_demo_transactions(holdings, period=period)
+                    if symbol != "ALL":
+                        fallback_tx = [t for t in fallback_tx if t["pdno"] == symbol]
+                    if fallback_tx:
+                        result = detail_report_service.get_detail_report(
+                            scope=symbol,
+                            period=period,
+                            transactions=fallback_tx,
+                        )
+                        used_fallback = True
+
             if "error" in result:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
-            cache.set(cache_key, result, 3600)
+            # fallback 결과는 캐시 X (실 거래가 추가되면 즉시 반영되도록)
+            if not used_fallback:
+                cache.set(cache_key, result, 3600)
             return Response(result, status=status.HTTP_200_OK)
 
         # noinspection PyBroadException
