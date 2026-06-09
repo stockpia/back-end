@@ -180,9 +180,6 @@ class StockChartView(APIView):
                 symbol, range=chart_range, type=chart_type, interval=interval
             )
 
-            if result.get('plotly') is None:
-                return Response(result, status=status.HTTP_400_BAD_REQUEST)
-
             # 시장 상태 + 적응형 TTL — 장 마감 후엔 다음 정규장 시작까지 캐시
             market_status, ttl = _market_status_and_ttl(chart_range)
             if chart_range == '1d':
@@ -190,6 +187,12 @@ class StockChartView(APIView):
                 result['market_close_kst'] = _kst_now().replace(
                     hour=15, minute=30, second=0, microsecond=0
                 ).isoformat()
+
+            # 분봉 데이터 없음 (정규장 전·새벽 등) — 400 대신 200 + plotly=null
+            # frontend 가 안내문 처리. 빈 응답은 짧은 TTL (60s) 로 캐시.
+            if result.get('plotly') is None:
+                cache.set(cache_key, result, 60)
+                return Response(result, status=status.HTTP_200_OK)
 
             cache.set(cache_key, result, ttl)
 
