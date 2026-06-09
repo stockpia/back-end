@@ -268,48 +268,55 @@ class HantuStock:
         """
         headers = self._header("FHKST03010200")
 
-        # 현재 시간 (장 마감 후면 15:30으로 설정)
+        # 현재 시각 — 정규장 마감 후면 15:30 기준
         now = datetime.now()
         if now.hour >= 16 or (now.hour == 15 and now.minute > 30):
-            end_time = "153000"
+            cur_end_minutes = 15 * 60 + 30
+        elif now.hour < 9:
+            cur_end_minutes = 9 * 60
         else:
-            end_time = now.strftime("%H%M%S")
+            cur_end_minutes = now.hour * 60 + now.minute
 
-        params = {
-            "FID_ETC_CLS_CODE": "",
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": ticker,
-            "FID_INPUT_HOUR_1": end_time,
-            "FID_PW_DATA_INCU_YN": "N",
-        }
+        # 정규장 09:00 ~ cur_end_minutes 까지를 30분 단위로 페이징.
+        # 기존 last_time 기반 페이징은 KIS 모의서버에서 동일 응답 반환하는 경우가
+        # 있어, 명시적 시간 점프 (30분 단위) 로 강제. 각 호출 ~30개씩, 중복 dedup.
         url = self._base_url + "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
 
+        end_minutes_list: list[int] = []
+        m = cur_end_minutes
+        while m >= 9 * 60:
+            end_minutes_list.append(m)
+            m -= 30  # 30분 단위 페이징
+        if not end_minutes_list:
+            end_minutes_list = [cur_end_minutes]
+
         all_data = []
-        for _ in range(10):  # 최대 10회 반복 (약 300개 데이터)
+        seen_times: set[str] = set()
+        for em in end_minutes_list:
+            end_time = f"{em // 60:02d}{em % 60:02d}00"
+            params = {
+                "FID_ETC_CLS_CODE": "",
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": ticker,
+                "FID_INPUT_HOUR_1": end_time,
+                "FID_PW_DATA_INCU_YN": "N",
+            }
             _, res = self._request(url, headers, params)
-
             if res.get("rt_cd") != "0":
-                if not all_data:
-                    return {"error": res.get("msg1", "조회 실패")}
-                break
-
-            output2 = res.get("output2", [])
-            if not output2:
-                break
-
-            all_data.extend(output2)
-
-            # 다음 조회를 위해 마지막 시간 설정
-            last_time = output2[-1].get("stck_cntg_hour", "")
-            if not last_time or last_time <= "090000":
-                break
-            params["FID_INPUT_HOUR_1"] = last_time
+                continue
+            output2 = res.get("output2", []) or []
+            for item in output2:
+                t = item.get("stck_cntg_hour", "")
+                if not t or t in seen_times:
+                    continue
+                seen_times.add(t)
+                all_data.append(item)
 
         if not all_data:
             return {"error": "분봉 데이터가 없습니다"}
 
-        # 데이터 정리 (시간순 정렬)
-        all_data.reverse()
+        # 시간순 정렬 (옛 → 최신) — 명시적 페이징으로 모은 결과 순서 보장
+        all_data.sort(key=lambda x: x.get("stck_cntg_hour", ""))
 
         # interval에 맞게 필터링 (5분봉이면 5분 단위만)
         filtered = []
