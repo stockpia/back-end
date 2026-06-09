@@ -169,22 +169,34 @@ class WebDetailReport:
         else:
             summary_metrics["total_profit_rate"] = 0
 
-        # 7단계: narrative 생성 (LLM)
-        narrative = self._generate_narrative(
-            transactions, summary_metrics, by_stock_summary, actual_days, period
-        )
-
-        # 8단계: 기획서 분석 블록
-        trading_tendency = self._analyze_trading_tendency(transactions)
-        frequency_change = self._analyze_frequency_change(transactions, scope, period)
-        water_down_pattern = self._analyze_water_down_pattern(transactions)
-        concentration_analysis = self._analyze_concentration(
-            transactions, summary_metrics["total_buy_amount"]
-        )
+        # 7~8단계: LLM narrative + 5개 독립 분석 블록 병렬 실행
+        # LLM (~수초) 가 메인 병목이고 나머지는 순수 계산 (수십 ms) — 동시 실행으로
+        # 총 wallclock = LLM 시간 + 약간의 오버헤드.
+        from concurrent.futures import ThreadPoolExecutor
         avg_investment = (
             summary_metrics["total_buy_amount"] / max(summary_metrics["buy_trades"], 1)
         )
-        volatility_analysis = self._analyze_volatility(transactions, avg_investment)
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            f_narr = ex.submit(
+                self._generate_narrative,
+                transactions, summary_metrics, by_stock_summary, actual_days, period,
+            )
+            f_tend = ex.submit(self._analyze_trading_tendency, transactions)
+            f_freq = ex.submit(self._analyze_frequency_change, transactions, scope, period)
+            f_water = ex.submit(self._analyze_water_down_pattern, transactions)
+            f_conc = ex.submit(
+                self._analyze_concentration, transactions, summary_metrics["total_buy_amount"],
+            )
+            f_vol = ex.submit(self._analyze_volatility, transactions, avg_investment)
+
+            narrative = f_narr.result()
+            trading_tendency = f_tend.result()
+            frequency_change = f_freq.result()
+            water_down_pattern = f_water.result()
+            concentration_analysis = f_conc.result()
+            volatility_analysis = f_vol.result()
+
+        # risk_observation 은 위 3개 결과 의존 → 병렬 후 단일 호출
         risk_observation = self._build_risk_observation(
             trading_tendency, concentration_analysis, volatility_analysis
         )
@@ -373,13 +385,9 @@ class WebDetailReport:
         - risk_point: 리스크 포인트
         - observation: 추가 관찰
         """
-        if not self.genai:
-            return self._fallback_narrative(metrics, by_stock)
-
         # 데이터 요약
         period_label = self.PERIODS.get(period, {}).get("label", "1달")
         stock_names = [s["name"] for s in by_stock]
-        top_stock = by_stock[0]["name"] if by_stock else "N/A"
 
         trade_info = f"""기간: 최근 {period_label} ({period_days}일)
 거래 종목: {', '.join(stock_names)}
@@ -410,18 +418,23 @@ class WebDetailReport:
 - 매수/매도 추천 금지
 - 인사말 없이 바로 작성"""
 
+        # llm_client.generate(): OpenAI primary + Gemini fallback (직접 호출 → 통합)
         try:
-            model = self.genai.GenerativeModel(
-                'gemini-2.5-flash',
-                system_instruction="당신은 한국 주식시장 거래내역 분석가입니다. 숫자와 데이터에 기반하여 관찰된 패턴만 설명합니다. 매수/매도 추천은 하지 않습니다."
-            )
-            response = model.generate_content(
+            from .llm_client import generate as llm_generate
+            text = llm_generate(
                 prompt,
-                generation_config={"temperature": 0.3, "max_output_tokens": 1024}
+                system_instruction=(
+                    "당신은 한국 주식시장 거래내역 분석가입니다. 숫자와 데이터에 "
+                    "기반하여 관찰된 패턴만 설명합니다. 매수/매도 추천은 하지 않습니다."
+                ),
+                temperature=0.3,
+                max_output_tokens=1024,
             )
-            return self._parse_narrative(response.text.strip())
+            if text:
+                return self._parse_narrative(text.strip())
         except Exception:
-            return self._fallback_narrative(metrics, by_stock)
+            pass
+        return self._fallback_narrative(metrics, by_stock)
 
     def _parse_narrative(self, text: str) -> Dict:
         """narrative 응답 파싱"""
@@ -809,10 +822,7 @@ class WebDetailReport:
         # 2단계: 컨텍스트 구성
         report_context = self._build_assistant_context(context)
 
-        # 3단계: AI 답변 생성
-        if not self.genai:
-            return self._fallback_assistant_answer(question, glossary_info)
-
+        # 3단계: AI 답변 생성 (llm_client 통합 — OpenAI primary + Gemini fallback)
         scope = context.get("scope", "ALL")
         period = context.get("period", "1m")
         period_label = self.PERIODS.get(period, {}).get("label", "1달")
@@ -839,17 +849,22 @@ class WebDetailReport:
 6. 답변 3-5문장 이내"""
 
         try:
-            model = self.genai.GenerativeModel(
-                'gemini-2.5-flash',
-                system_instruction="당신은 주토피아 AI 비서입니다. 상세 리포트의 '해설자' 역할을 합니다. 새로운 리포트 생성, 투자 판단, 매수/매도 추천, 외부 시황 예측은 하지 않습니다. 리포트 데이터와 용어 사전만을 참조하여 답변합니다."
-            )
-            response = model.generate_content(
+            from .llm_client import generate as llm_generate
+            text = llm_generate(
                 prompt,
-                generation_config={"temperature": 0.3, "max_output_tokens": 1024}
+                system_instruction=(
+                    "당신은 주토피아 AI 비서입니다. 상세 리포트의 '해설자' 역할을 합니다. "
+                    "새로운 리포트 생성, 투자 판단, 매수/매도 추천, 외부 시황 예측은 하지 않습니다. "
+                    "리포트 데이터와 용어 사전만을 참조하여 답변합니다."
+                ),
+                temperature=0.3,
+                max_output_tokens=1024,
             )
+            if not text:
+                return self._fallback_assistant_answer(question, glossary_info)
 
             import re
-            answer = re.sub(r'\*\*(.*?)\*\*', r'\1', response.text.strip())
+            answer = re.sub(r'\*\*(.*?)\*\*', r'\1', text.strip())
 
             source = "report_context"
             if glossary_info.get("terms"):
