@@ -152,31 +152,19 @@ class WebDetailReport:
         expected_days = period_months * 30
         period_insufficient = actual_days < expected_days
 
-        # 4단계: 요약 메트릭 계산
+        # 4~5단계: 요약 메트릭 + 종목별 요약 (순수 계산)
         summary_metrics = self._calculate_metrics(transactions)
-
-        # 5단계: 종목별 요약
         by_stock_summary = self._calculate_by_stock(transactions)
-
-        # 6단계: 보유 종목 평가손익 반영
-        eval_profit = self._get_eval_profit(scope)
-        summary_metrics["eval_profit"] = eval_profit
-        summary_metrics["total_profit"] = summary_metrics["realized_profit"] + eval_profit
-        if summary_metrics["total_buy_amount"] > 0:
-            summary_metrics["total_profit_rate"] = round(
-                summary_metrics["total_profit"] / summary_metrics["total_buy_amount"] * 100, 1
-            )
-        else:
-            summary_metrics["total_profit_rate"] = 0
-
-        # 7~8단계: LLM narrative + 5개 독립 분석 블록 병렬 실행
-        # LLM (~수초) 가 메인 병목이고 나머지는 순수 계산 (수십 ms) — 동시 실행으로
-        # 총 wallclock = LLM 시간 + 약간의 오버헤드.
-        from concurrent.futures import ThreadPoolExecutor
         avg_investment = (
             summary_metrics["total_buy_amount"] / max(summary_metrics["buy_trades"], 1)
         )
-        with ThreadPoolExecutor(max_workers=6) as ex:
+
+        # 6~8단계: KIS eval_profit + LLM narrative + 5개 분석 블록 모두 병렬 실행.
+        # narrative prompt 에서 eval_profit 의존성을 제거해서 (실현손익 위주 분석)
+        # 7개 작업을 동시에 시작 → 총 wallclock = max(LLM, KIS eval_profit).
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=7) as ex:
+            f_eval = ex.submit(self._get_eval_profit, scope)
             f_narr = ex.submit(
                 self._generate_narrative,
                 transactions, summary_metrics, by_stock_summary, actual_days, period,
@@ -189,12 +177,23 @@ class WebDetailReport:
             )
             f_vol = ex.submit(self._analyze_volatility, transactions, avg_investment)
 
+            eval_profit = f_eval.result()
             narrative = f_narr.result()
             trading_tendency = f_tend.result()
             frequency_change = f_freq.result()
             water_down_pattern = f_water.result()
             concentration_analysis = f_conc.result()
             volatility_analysis = f_vol.result()
+
+        # eval_profit 을 metrics 에 반영 (사용자 화면 표시용)
+        summary_metrics["eval_profit"] = eval_profit
+        summary_metrics["total_profit"] = summary_metrics["realized_profit"] + eval_profit
+        if summary_metrics["total_buy_amount"] > 0:
+            summary_metrics["total_profit_rate"] = round(
+                summary_metrics["total_profit"] / summary_metrics["total_buy_amount"] * 100, 1
+            )
+        else:
+            summary_metrics["total_profit_rate"] = 0
 
         # risk_observation 은 위 3개 결과 의존 → 병렬 후 단일 호출
         risk_observation = self._build_risk_observation(
@@ -385,50 +384,43 @@ class WebDetailReport:
         - risk_point: 리스크 포인트
         - observation: 추가 관찰
         """
-        # 데이터 요약
         period_label = self.PERIODS.get(period, {}).get("label", "1달")
-        stock_names = [s["name"] for s in by_stock]
 
-        trade_info = f"""기간: 최근 {period_label} ({period_days}일)
-거래 종목: {', '.join(stock_names)}
-총 거래 횟수: {metrics['total_trades']}회 (매수 {metrics['buy_trades']}회, 매도 {metrics['sell_trades']}회)
-총 매수금액: {metrics['total_buy_amount']:,.0f}원
-총 매도금액: {metrics['total_sell_amount']:,.0f}원
-실현손익: {metrics['realized_profit']:+,.0f}원
-평가손익: {metrics.get('eval_profit', 0):+,.0f}원"""
+        # 압축된 trade_info: 핵심 수치 + 종목별은 % 만 (prompt token 절감).
+        # 평가손익은 eval_profit 병렬 호출 의존성 제거 위해 제외 (실현손익 위주 분석).
+        per_stock = ", ".join(
+            f"{s['name']}({s['profit_rate']:+.1f}%)" for s in by_stock
+        )
+        trade_info = (
+            f"기간 {period_label}({period_days}일) · "
+            f"거래 {metrics['total_trades']}회(매수 {metrics['buy_trades']}/매도 {metrics['sell_trades']}) · "
+            f"매수 {metrics['total_buy_amount']:,.0f}원 / 매도 {metrics['total_sell_amount']:,.0f}원 · "
+            f"실현손익 {metrics['realized_profit']:+,.0f}원\n"
+            f"종목별: {per_stock}"
+        )
 
-        for s in by_stock:
-            trade_info += f"\n  {s['name']}: 매수 {s['buy_amount']:,.0f}원 / 매도 {s['sell_amount']:,.0f}원 / 손익률 {s['profit_rate']}%"
+        # prompt 압축 — 조건은 system_instruction 에 통합, prompt 는 데이터 + 라벨만
+        prompt = (
+            f"{trade_info}\n\n"
+            "위 데이터로 다음 4항목을 각 1-2문장 한국어로 작성:\n"
+            "[flow] 거래 흐름\n"
+            "[pattern] 매매 패턴 (분할매수/매도 비중/빈도)\n"
+            "[risk_point] 리스크 포인트\n"
+            "[observation] 추가 관찰"
+        )
 
-        prompt = f"""다음은 투자자의 최근 {period_label}간 거래내역 요약입니다.
-
-{trade_info}
-
-위 데이터를 기반으로 아래 4가지 서술형 분석을 각각 1-2문장으로 작성해주세요.
-
-[flow] 거래 흐름: 어떤 종목에 집중했고 어떤 패턴으로 거래했는지
-[pattern] 매매 패턴: 분할매수, 매도비중, 거래빈도 등 특징
-[risk_point] 리스크 포인트: 현재 포지션의 주의점
-[observation] 추가 관찰: 그 외 특징적인 부분
-
-조건:
-- "~습니다" 정중한 말투
-- 판단/추천이 아닌 관찰 + 설명만
-- 각 항목 2문장 이내
-- 매수/매도 추천 금지
-- 인사말 없이 바로 작성"""
-
-        # llm_client.generate(): OpenAI primary + Gemini fallback (직접 호출 → 통합)
         try:
             from .llm_client import generate as llm_generate
             text = llm_generate(
                 prompt,
                 system_instruction=(
-                    "당신은 한국 주식시장 거래내역 분석가입니다. 숫자와 데이터에 "
-                    "기반하여 관찰된 패턴만 설명합니다. 매수/매도 추천은 하지 않습니다."
+                    "당신은 한국 주식시장 거래내역 분석가입니다. 데이터 기반 관찰만 "
+                    "서술하고 매수/매도 추천은 절대 하지 않습니다. '~습니다' 정중한 "
+                    "말투, 인사말 없이 [라벨] 형식으로 4항목만 바로 출력하세요."
                 ),
                 temperature=0.3,
-                max_output_tokens=1024,
+                # 4항목 X 2문장 X ~30 tokens ≈ 240 → 512 면 여유, 응답 빠름
+                max_output_tokens=512,
             )
             if text:
                 return self._parse_narrative(text.strip())
