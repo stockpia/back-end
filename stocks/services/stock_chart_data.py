@@ -393,7 +393,7 @@ class StockChartDataProvider:
 
     # ==================== 5분봉 데이터 (하루 탭용) ====================
 
-    def get_minute_chart_data(self, ticker: str, interval: int = 10) -> Dict:
+    def get_minute_chart_data(self, ticker: str, interval: int = 1) -> Dict:
         """
         분봉 차트 데이터 조회 (하루 탭용)
 
