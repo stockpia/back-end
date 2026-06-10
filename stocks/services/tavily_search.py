@@ -135,7 +135,8 @@ class TavilySearchClient:
     def search_market_sentiment(
         self,
         company_name: str,
-        max_results: int = 5
+        max_results: int = 5,
+        ticker: str = ""
     ) -> Dict:
         """
         시장 반응/커뮤니티 의견 검색
@@ -143,23 +144,28 @@ class TavilySearchClient:
         Args:
             company_name: 회사명
             max_results: 최대 결과 수
+            ticker: 종목코드 (6자리) — 쿼리 + 후처리 필터링에 사용
 
         Returns:
-            검색 결과 딕셔너리
+            검색 결과 딕셔너리. 결과는 title/content 에 company_name 또는 ticker 가
+            포함된 항목만 (다른 종목 글 오탐 차단).
         """
         if not self.available:
             return {"error": "Tavily not available", "results": []}
 
-        # 한국 주식 커뮤니티 도메인 (네이버 종목토론실 + 디씨 종목갤러리 + 씽크풀 등)
-        # + 일반 도메인도 포함하여 검색 결과 풍부하게.
-        query = f"{company_name} 주식 토론 의견 전망 종목토론"
+        # 쿼리에 ticker 도 포함해 종목 매칭 정확도 향상.
+        # 다른 종목 코드 (예: 005380 현대차) 가 응답에 섞이는 케이스를 줄임.
+        if ticker:
+            query = f"{company_name} {ticker} 주식 토론 의견 전망"
+        else:
+            query = f"{company_name} 주식 토론 의견 전망 종목토론"
 
         try:
             response = self.client.search(
                 query=query,
                 search_depth="basic",
                 time_range="week",   # 1주일로 확대 (1일은 결과 거의 0건)
-                max_results=max(max_results, 10),
+                max_results=max(max_results, 15),  # 후처리 필터링 대비 여유 있게
                 include_answer=True,
                 include_domains=[
                     # 종목 토론·커뮤니티
@@ -176,6 +182,23 @@ class TavilySearchClient:
                 ],
             )
 
+            # 후처리 필터링 — title 또는 content 에 company_name 또는 ticker 가
+            # 포함된 결과만 통과시켜 무관 종목/외국 글 차단.
+            raw_results = response.get("results", []) or []
+            filtered_results = []
+            cname_lower = (company_name or "").strip().lower()
+            for r in raw_results:
+                title = (r.get("title") or "").lower()
+                content = (r.get("content") or "").lower()
+                hay = f"{title} {content}"
+                matched = False
+                if cname_lower and cname_lower in hay:
+                    matched = True
+                elif ticker and ticker in hay:
+                    matched = True
+                if matched:
+                    filtered_results.append(r)
+
             return {
                 "query": query,
                 "answer": response.get("answer", ""),
@@ -186,7 +209,7 @@ class TavilySearchClient:
                         "content": r.get("content", "")[:300],
                         "published_date": r.get("published_date", "")  # 게시 일자
                     }
-                    for r in response.get("results", [])
+                    for r in filtered_results
                 ],
                 "searched_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
