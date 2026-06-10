@@ -224,10 +224,11 @@ class StockNewsDataProvider:
         if not self.tavily:
             return self._error_response("Tavily 검색 불가")
 
-        # 시장 반응 검색
+        # 시장 반응 검색 — ticker 도 전달해 다른 종목 글 오탐 차단
         search_result = self.tavily.search_market_sentiment(
             company_name=company_name,
-            max_results=15
+            max_results=15,
+            ticker=symbol
         )
 
         if "error" in search_result:
